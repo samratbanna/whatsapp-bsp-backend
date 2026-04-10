@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
-import { Role, UserStatus } from '../../../common/enums';
+import { FeaturePermission, Role, UserStatus } from '../../../common/enums';
 
 export type UserDocument = User & Document;
 
@@ -29,6 +29,9 @@ export class User {
 
   @Prop({ trim: true })
   phone?: string;
+
+  @Prop({ type: [String], enum: FeaturePermission, default: [] })
+  permissions: FeaturePermission[];
 
   @Prop({ select: false })
   refreshToken?: string; // hashed

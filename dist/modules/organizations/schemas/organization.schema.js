@@ -9,10 +9,144 @@ var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.OrganizationSchema = exports.Organization = void 0;
+exports.OrganizationSchema = exports.Organization = exports.LoginUserDetails = exports.InvoiceBusinessDetails = void 0;
 const mongoose_1 = require("@nestjs/mongoose");
 const mongoose_2 = require("mongoose");
 const enums_1 = require("../../../common/enums");
+let InvoiceBusinessDetails = class InvoiceBusinessDetails {
+    legalBusinessName;
+    tradeName;
+    gstin;
+    pan;
+    cin;
+    udyamNumber;
+    addressLine1;
+    addressLine2;
+    city;
+    state;
+    pinCode;
+    country;
+    contactEmail;
+    contactPhone;
+    bankAccountName;
+    bankAccountNumber;
+    bankName;
+    ifscCode;
+    bankBranch;
+};
+exports.InvoiceBusinessDetails = InvoiceBusinessDetails;
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true }),
+    __metadata("design:type", String)
+], InvoiceBusinessDetails.prototype, "legalBusinessName", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true }),
+    __metadata("design:type", String)
+], InvoiceBusinessDetails.prototype, "tradeName", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true, uppercase: true }),
+    __metadata("design:type", String)
+], InvoiceBusinessDetails.prototype, "gstin", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true, uppercase: true }),
+    __metadata("design:type", String)
+], InvoiceBusinessDetails.prototype, "pan", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true, uppercase: true }),
+    __metadata("design:type", String)
+], InvoiceBusinessDetails.prototype, "cin", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true, uppercase: true }),
+    __metadata("design:type", String)
+], InvoiceBusinessDetails.prototype, "udyamNumber", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true }),
+    __metadata("design:type", String)
+], InvoiceBusinessDetails.prototype, "addressLine1", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true }),
+    __metadata("design:type", String)
+], InvoiceBusinessDetails.prototype, "addressLine2", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true }),
+    __metadata("design:type", String)
+], InvoiceBusinessDetails.prototype, "city", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true }),
+    __metadata("design:type", String)
+], InvoiceBusinessDetails.prototype, "state", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true }),
+    __metadata("design:type", String)
+], InvoiceBusinessDetails.prototype, "pinCode", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true, default: 'India' }),
+    __metadata("design:type", String)
+], InvoiceBusinessDetails.prototype, "country", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true, lowercase: true }),
+    __metadata("design:type", String)
+], InvoiceBusinessDetails.prototype, "contactEmail", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true }),
+    __metadata("design:type", String)
+], InvoiceBusinessDetails.prototype, "contactPhone", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true }),
+    __metadata("design:type", String)
+], InvoiceBusinessDetails.prototype, "bankAccountName", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true }),
+    __metadata("design:type", String)
+], InvoiceBusinessDetails.prototype, "bankAccountNumber", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true }),
+    __metadata("design:type", String)
+], InvoiceBusinessDetails.prototype, "bankName", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true, uppercase: true }),
+    __metadata("design:type", String)
+], InvoiceBusinessDetails.prototype, "ifscCode", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true }),
+    __metadata("design:type", String)
+], InvoiceBusinessDetails.prototype, "bankBranch", void 0);
+exports.InvoiceBusinessDetails = InvoiceBusinessDetails = __decorate([
+    (0, mongoose_1.Schema)({ _id: false })
+], InvoiceBusinessDetails);
+const InvoiceBusinessDetailsSchema = mongoose_1.SchemaFactory.createForClass(InvoiceBusinessDetails);
+let LoginUserDetails = class LoginUserDetails {
+    userId;
+    name;
+    email;
+    phone;
+    designation;
+};
+exports.LoginUserDetails = LoginUserDetails;
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true }),
+    __metadata("design:type", String)
+], LoginUserDetails.prototype, "userId", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true }),
+    __metadata("design:type", String)
+], LoginUserDetails.prototype, "name", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true, lowercase: true }),
+    __metadata("design:type", String)
+], LoginUserDetails.prototype, "email", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true }),
+    __metadata("design:type", String)
+], LoginUserDetails.prototype, "phone", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ trim: true }),
+    __metadata("design:type", String)
+], LoginUserDetails.prototype, "designation", void 0);
+exports.LoginUserDetails = LoginUserDetails = __decorate([
+    (0, mongoose_1.Schema)({ _id: false })
+], LoginUserDetails);
+const LoginUserDetailsSchema = mongoose_1.SchemaFactory.createForClass(LoginUserDetails);
 let Organization = class Organization {
     name;
     slug;
@@ -28,6 +162,8 @@ let Organization = class Organization {
     address;
     country;
     timezone;
+    businessDetails;
+    loginUserDetails;
 };
 exports.Organization = Organization;
 __decorate([
@@ -86,6 +222,14 @@ __decorate([
     (0, mongoose_1.Prop)({ trim: true }),
     __metadata("design:type", String)
 ], Organization.prototype, "timezone", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: InvoiceBusinessDetailsSchema }),
+    __metadata("design:type", InvoiceBusinessDetails)
+], Organization.prototype, "businessDetails", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: LoginUserDetailsSchema }),
+    __metadata("design:type", LoginUserDetails)
+], Organization.prototype, "loginUserDetails", void 0);
 exports.Organization = Organization = __decorate([
     (0, mongoose_1.Schema)({ timestamps: true })
 ], Organization);

@@ -31,7 +31,7 @@ let WabaController = class WabaController {
         return this.wabaService.connect(orgId, dto);
     }
     findAll(orgId) {
-        return this.wabaService.findByOrg(orgId);
+        return this.wabaService.findAll();
     }
     findOne(id, orgId) {
         return this.wabaService.findOne(id, orgId);

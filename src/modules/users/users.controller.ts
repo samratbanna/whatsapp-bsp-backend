@@ -17,7 +17,14 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Role, UserStatus } from '../../common/enums';
 import { UsersService } from './users.service';
-import { CreateUserDto, UpdateUserDto, ChangePasswordDto } from './dto/user.dto';
+import {
+  BulkCreateOrganizationUsersDto,
+  ChangePasswordDto,
+  CreateOrganizationUserDto,
+  CreateUserDto,
+  UpdateOrganizationUserDto,
+  UpdateUserDto,
+} from './dto/user.dto';
 
 @ApiTags('Users')
 @ApiBearerAuth()
@@ -25,6 +32,49 @@ import { CreateUserDto, UpdateUserDto, ChangePasswordDto } from './dto/user.dto'
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
+
+  // ── Org admin: manage own organization users ───────────────────────
+  @Post('me/team')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ORG_ADMIN)
+  createOrgUser(
+    @CurrentUser('orgId') orgId: string,
+    @Body() dto: CreateOrganizationUserDto,
+  ) {
+    return this.usersService.createByOrgAdmin(orgId, dto);
+  }
+
+  @Post('me/team/bulk')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ORG_ADMIN)
+  createMultipleOrgUsers(
+    @CurrentUser('orgId') orgId: string,
+    @Body() dto: BulkCreateOrganizationUsersDto,
+  ) {
+    return this.usersService.bulkCreateByOrgAdmin(orgId, dto.users);
+  }
+
+  @Get('me/team')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ORG_ADMIN)
+  @ApiQuery({ name: 'status', enum: UserStatus, required: false })
+  findMyOrgUsers(
+    @CurrentUser('orgId') orgId: string,
+    @Query('status') status?: UserStatus,
+  ) {
+    return this.usersService.findAllByOrganization(orgId, status);
+  }
+
+  @Put('me/team/:id')
+  @UseGuards(RolesGuard)
+  @Roles(Role.ORG_ADMIN)
+  updateOrgUser(
+    @CurrentUser('orgId') orgId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateOrganizationUserDto,
+  ) {
+    return this.usersService.updateByOrgAdmin(orgId, id, dto);
+  }
 
   // ── Super admin: full user management ─────────────────────────────
   @Post()

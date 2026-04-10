@@ -3,13 +3,19 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import { User, UserDocument } from './schemas/user.schema';
 import { CreateUserDto, UpdateUserDto, ChangePasswordDto } from './dto/user.dto';
-import { Role, UserStatus } from '../../common/enums';
+import {
+  ALL_FEATURE_PERMISSIONS,
+  FeaturePermission,
+  Role,
+  UserStatus,
+} from '../../common/enums';
 
 @Injectable()
 export class UsersService {
@@ -21,10 +27,19 @@ export class UsersService {
     const existing = await this.userModel.findOne({ email: dto.email });
     if (existing) throw new ConflictException('Email already registered');
 
+    if (dto.role === Role.SUPER_ADMIN && dto.organizationId) {
+      throw new BadRequestException('Super admin cannot belong to an organization');
+    }
+
+    const normalizedRole = dto.role || Role.ORG_ADMIN;
+    const permissions = this.getResolvedPermissions(normalizedRole, dto.permissions);
+
     const hashed = await bcrypt.hash(dto.password, 12);
 
     const user = new this.userModel({
       ...dto,
+      role: normalizedRole,
+      permissions,
       password: hashed,
       organization: dto.organizationId
         ? new Types.ObjectId(dto.organizationId)
@@ -66,10 +81,54 @@ export class UsersService {
     return query.exec();
   }
 
+  async createByOrgAdmin(
+    orgId: string,
+    dto: CreateUserDto,
+  ): Promise<UserDocument> {
+    if (!orgId) {
+      throw new BadRequestException('Organization ID is required for org admin');
+    }
+
+    const role = dto.role || Role.AGENT;
+    if (role !== Role.AGENT) {
+      throw new ForbiddenException('Org admin can only create organization users with agent role');
+    }
+
+    return this.create({
+      ...dto,
+      role,
+      organizationId: orgId,
+    });
+  }
+
+  async bulkCreateByOrgAdmin(
+    orgId: string,
+    users: CreateUserDto[],
+  ): Promise<UserDocument[]> {
+    if (!users.length) return [];
+    return Promise.all(users.map((user) => this.createByOrgAdmin(orgId, user)));
+  }
+
+  async findAllByOrganization(
+    orgId: string,
+    status?: UserStatus,
+  ): Promise<UserDocument[]> {
+    if (!orgId) {
+      throw new BadRequestException('Organization ID is required');
+    }
+    return this.findAll(orgId, status);
+  }
+
   async update(id: string, dto: UpdateUserDto): Promise<UserDocument> {
     // If password is being updated, hash it
     if (dto.password) {
       dto.password = await bcrypt.hash(dto.password, 12);
+    }
+
+    if (dto.role) {
+      dto.permissions = this.getResolvedPermissions(dto.role, dto.permissions);
+    } else if (dto.permissions && dto.permissions.length) {
+      dto.permissions = [...new Set(dto.permissions)];
     }
 
     const user = await this.userModel
@@ -80,6 +139,28 @@ export class UsersService {
 
     if (!user) throw new NotFoundException('User not found');
     return user;
+  }
+
+  async updateByOrgAdmin(
+    orgId: string,
+    id: string,
+    dto: UpdateUserDto,
+  ): Promise<UserDocument> {
+    const existing = await this.userModel.findById(id).exec();
+    if (!existing) throw new NotFoundException('User not found');
+
+    if (!existing.organization || existing.organization.toString() !== orgId) {
+      throw new ForbiddenException('You can only manage users in your own organization');
+    }
+
+    if (existing.role === Role.ORG_ADMIN || dto.role === Role.ORG_ADMIN || dto.role === Role.SUPER_ADMIN) {
+      throw new ForbiddenException('Org admin can only manage agent users');
+    }
+
+    dto.organizationId = orgId;
+    dto.role = Role.AGENT;
+
+    return this.update(id, dto);
   }
 
   async changePassword(id: string, dto: ChangePasswordDto): Promise<void> {
@@ -132,10 +213,21 @@ export class UsersService {
       email,
       password: hashed,
       role: Role.SUPER_ADMIN,
+      permissions: ALL_FEATURE_PERMISSIONS,
       status: UserStatus.ACTIVE,
       organization: null,
     });
 
     console.log(`✅ Super admin seeded: ${email}`);
+  }
+
+  private getResolvedPermissions(
+    role: Role,
+    permissions?: FeaturePermission[],
+  ): FeaturePermission[] {
+    if (role === Role.SUPER_ADMIN || role === Role.ORG_ADMIN) {
+      return [...ALL_FEATURE_PERMISSIONS];
+    }
+    return permissions ? [...new Set(permissions)] : [];
   }
 }

@@ -31,7 +31,7 @@ export class WabaController {
   @Get()
   @Roles(Role.ORG_ADMIN, Role.SUPER_ADMIN, Role.AGENT)
   findAll(@CurrentUser('orgId') orgId: string) {
-    return this.wabaService.findByOrg(orgId);
+    return this.wabaService.findAll();
   }
 
   @Get(':id')

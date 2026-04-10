@@ -93,6 +93,13 @@ export class WabaService {
       .exec();
   }
 
+  async findAll(): Promise<WabaDocument[]> {
+    return this.wabaModel
+      .find()
+      .select('-accessToken')
+      .exec();
+  }
+
   async findOne(id: string, orgId?: string): Promise<WabaDocument> {
     const filter: any = { _id: id };
     if (orgId) filter.organization = new Types.ObjectId(orgId);

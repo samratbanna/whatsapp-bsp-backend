@@ -13,6 +13,7 @@ const organization_schema_1 = require("./schemas/organization.schema");
 const organizations_service_1 = require("./organizations.service");
 const organizations_controller_1 = require("./organizations.controller");
 const wallet_module_1 = require("../wallet/wallet.module");
+const users_module_1 = require("../users/users.module");
 let OrganizationsModule = class OrganizationsModule {
 };
 exports.OrganizationsModule = OrganizationsModule;
@@ -23,6 +24,7 @@ exports.OrganizationsModule = OrganizationsModule = __decorate([
                 { name: organization_schema_1.Organization.name, schema: organization_schema_1.OrganizationSchema },
             ]),
             wallet_module_1.WalletModule,
+            users_module_1.UsersModule,
         ],
         controllers: [organizations_controller_1.OrganizationsController],
         providers: [organizations_service_1.OrganizationsService],

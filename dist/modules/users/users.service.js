@@ -61,9 +61,16 @@ let UsersService = class UsersService {
         const existing = await this.userModel.findOne({ email: dto.email });
         if (existing)
             throw new common_1.ConflictException('Email already registered');
+        if (dto.role === enums_1.Role.SUPER_ADMIN && dto.organizationId) {
+            throw new common_1.BadRequestException('Super admin cannot belong to an organization');
+        }
+        const normalizedRole = dto.role || enums_1.Role.ORG_ADMIN;
+        const permissions = this.getResolvedPermissions(normalizedRole, dto.permissions);
         const hashed = await bcrypt.hash(dto.password, 12);
         const user = new this.userModel({
             ...dto,
+            role: normalizedRole,
+            permissions,
             password: hashed,
             organization: dto.organizationId
                 ? new mongoose_2.Types.ObjectId(dto.organizationId)
@@ -102,9 +109,40 @@ let UsersService = class UsersService {
             query.select('+password +refreshToken');
         return query.exec();
     }
+    async createByOrgAdmin(orgId, dto) {
+        if (!orgId) {
+            throw new common_1.BadRequestException('Organization ID is required for org admin');
+        }
+        const role = dto.role || enums_1.Role.AGENT;
+        if (role !== enums_1.Role.AGENT) {
+            throw new common_1.ForbiddenException('Org admin can only create organization users with agent role');
+        }
+        return this.create({
+            ...dto,
+            role,
+            organizationId: orgId,
+        });
+    }
+    async bulkCreateByOrgAdmin(orgId, users) {
+        if (!users.length)
+            return [];
+        return Promise.all(users.map((user) => this.createByOrgAdmin(orgId, user)));
+    }
+    async findAllByOrganization(orgId, status) {
+        if (!orgId) {
+            throw new common_1.BadRequestException('Organization ID is required');
+        }
+        return this.findAll(orgId, status);
+    }
     async update(id, dto) {
         if (dto.password) {
             dto.password = await bcrypt.hash(dto.password, 12);
+        }
+        if (dto.role) {
+            dto.permissions = this.getResolvedPermissions(dto.role, dto.permissions);
+        }
+        else if (dto.permissions && dto.permissions.length) {
+            dto.permissions = [...new Set(dto.permissions)];
         }
         const user = await this.userModel
             .findByIdAndUpdate(id, dto, { new: true })
@@ -114,6 +152,20 @@ let UsersService = class UsersService {
         if (!user)
             throw new common_1.NotFoundException('User not found');
         return user;
+    }
+    async updateByOrgAdmin(orgId, id, dto) {
+        const existing = await this.userModel.findById(id).exec();
+        if (!existing)
+            throw new common_1.NotFoundException('User not found');
+        if (!existing.organization || existing.organization.toString() !== orgId) {
+            throw new common_1.ForbiddenException('You can only manage users in your own organization');
+        }
+        if (existing.role === enums_1.Role.ORG_ADMIN || dto.role === enums_1.Role.ORG_ADMIN || dto.role === enums_1.Role.SUPER_ADMIN) {
+            throw new common_1.ForbiddenException('Org admin can only manage agent users');
+        }
+        dto.organizationId = orgId;
+        dto.role = enums_1.Role.AGENT;
+        return this.update(id, dto);
     }
     async changePassword(id, dto) {
         const user = await this.userModel.findById(id).select('+password').exec();
@@ -160,10 +212,17 @@ let UsersService = class UsersService {
             email,
             password: hashed,
             role: enums_1.Role.SUPER_ADMIN,
+            permissions: enums_1.ALL_FEATURE_PERMISSIONS,
             status: enums_1.UserStatus.ACTIVE,
             organization: null,
         });
         console.log(`✅ Super admin seeded: ${email}`);
+    }
+    getResolvedPermissions(role, permissions) {
+        if (role === enums_1.Role.SUPER_ADMIN || role === enums_1.Role.ORG_ADMIN) {
+            return [...enums_1.ALL_FEATURE_PERMISSIONS];
+        }
+        return permissions ? [...new Set(permissions)] : [];
     }
 };
 exports.UsersService = UsersService;

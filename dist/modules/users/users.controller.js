@@ -27,6 +27,18 @@ let UsersController = class UsersController {
     constructor(usersService) {
         this.usersService = usersService;
     }
+    createOrgUser(orgId, dto) {
+        return this.usersService.createByOrgAdmin(orgId, dto);
+    }
+    createMultipleOrgUsers(orgId, dto) {
+        return this.usersService.bulkCreateByOrgAdmin(orgId, dto.users);
+    }
+    findMyOrgUsers(orgId, status) {
+        return this.usersService.findAllByOrganization(orgId, status);
+    }
+    updateOrgUser(orgId, id, dto) {
+        return this.usersService.updateByOrgAdmin(orgId, id, dto);
+    }
     create(dto) {
         return this.usersService.create(dto);
     }
@@ -60,6 +72,48 @@ let UsersController = class UsersController {
     }
 };
 exports.UsersController = UsersController;
+__decorate([
+    (0, common_1.Post)('me/team'),
+    (0, common_1.UseGuards)(roles_guard_1.RolesGuard),
+    (0, roles_decorator_1.Roles)(enums_1.Role.ORG_ADMIN),
+    __param(0, (0, current_user_decorator_1.CurrentUser)('orgId')),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, user_dto_1.CreateOrganizationUserDto]),
+    __metadata("design:returntype", void 0)
+], UsersController.prototype, "createOrgUser", null);
+__decorate([
+    (0, common_1.Post)('me/team/bulk'),
+    (0, common_1.UseGuards)(roles_guard_1.RolesGuard),
+    (0, roles_decorator_1.Roles)(enums_1.Role.ORG_ADMIN),
+    __param(0, (0, current_user_decorator_1.CurrentUser)('orgId')),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, user_dto_1.BulkCreateOrganizationUsersDto]),
+    __metadata("design:returntype", void 0)
+], UsersController.prototype, "createMultipleOrgUsers", null);
+__decorate([
+    (0, common_1.Get)('me/team'),
+    (0, common_1.UseGuards)(roles_guard_1.RolesGuard),
+    (0, roles_decorator_1.Roles)(enums_1.Role.ORG_ADMIN),
+    (0, swagger_1.ApiQuery)({ name: 'status', enum: enums_1.UserStatus, required: false }),
+    __param(0, (0, current_user_decorator_1.CurrentUser)('orgId')),
+    __param(1, (0, common_1.Query)('status')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String]),
+    __metadata("design:returntype", void 0)
+], UsersController.prototype, "findMyOrgUsers", null);
+__decorate([
+    (0, common_1.Put)('me/team/:id'),
+    (0, common_1.UseGuards)(roles_guard_1.RolesGuard),
+    (0, roles_decorator_1.Roles)(enums_1.Role.ORG_ADMIN),
+    __param(0, (0, current_user_decorator_1.CurrentUser)('orgId')),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, user_dto_1.UpdateOrganizationUserDto]),
+    __metadata("design:returntype", void 0)
+], UsersController.prototype, "updateOrgUser", null);
 __decorate([
     (0, common_1.Post)(),
     (0, common_1.UseGuards)(roles_guard_1.RolesGuard),

@@ -10,7 +10,11 @@ import { UsersService } from '../users/users.service';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { LoginDto, RegisterDto, RefreshTokenDto } from './dto/auth.dto';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
-import { UserStatus } from '../../common/enums';
+import {
+  ALL_FEATURE_PERMISSIONS,
+  Role,
+  UserStatus,
+} from '../../common/enums';
 
 @Injectable()
 export class AuthService {
@@ -26,13 +30,15 @@ export class AuthService {
     // Create org first
     const org = await this.orgsService.create({
       name: dto.organizationName,
-    });
+    }, { createAdminUser: false });
 
     // Create org admin
     const user = await this.usersService.create({
       name: dto.name,
       email: dto.email,
       password: dto.password,
+      role: Role.ORG_ADMIN,
+      permissions: ALL_FEATURE_PERMISSIONS,
       organizationId: (org._id as any).toString(),
     });
 
@@ -108,6 +114,7 @@ export class AuthService {
       email: user.email,
       role: user.role,
       orgId: user.organization?._id?.toString() || user.organization?.toString() || null,
+      permissions: user.permissions || [],
     };
 
     const [accessToken, refreshToken] = await Promise.all([

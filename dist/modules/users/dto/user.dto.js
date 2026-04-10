@@ -9,7 +9,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ChangePasswordDto = exports.UpdateUserDto = exports.CreateUserDto = void 0;
+exports.UpdateOrganizationUserDto = exports.BulkCreateOrganizationUsersDto = exports.CreateOrganizationUserDto = exports.ChangePasswordDto = exports.UpdateUserDto = exports.CreateUserDto = void 0;
 const class_validator_1 = require("class-validator");
 const swagger_1 = require("@nestjs/swagger");
 const enums_1 = require("../../../common/enums");
@@ -20,6 +20,7 @@ class CreateUserDto {
     role;
     organizationId;
     phone;
+    permissions;
 }
 exports.CreateUserDto = CreateUserDto;
 __decorate([
@@ -60,6 +61,13 @@ __decorate([
     (0, class_validator_1.IsOptional)(),
     __metadata("design:type", String)
 ], CreateUserDto.prototype, "phone", void 0);
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ enum: enums_1.FeaturePermission, isArray: true }),
+    (0, class_validator_1.IsArray)(),
+    (0, class_validator_1.IsEnum)(enums_1.FeaturePermission, { each: true }),
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", Array)
+], CreateUserDto.prototype, "permissions", void 0);
 class UpdateUserDto extends (0, swagger_1.PartialType)(CreateUserDto) {
     status;
 }
@@ -89,4 +97,29 @@ __decorate([
     }),
     __metadata("design:type", String)
 ], ChangePasswordDto.prototype, "newPassword", void 0);
+class CreateOrganizationUserDto extends (0, swagger_1.OmitType)(CreateUserDto, [
+    'organizationId',
+    'role',
+]) {
+    role;
+}
+exports.CreateOrganizationUserDto = CreateOrganizationUserDto;
+__decorate([
+    (0, swagger_1.ApiPropertyOptional)({ enum: enums_1.Role, default: enums_1.Role.AGENT }),
+    (0, class_validator_1.IsEnum)(enums_1.Role),
+    (0, class_validator_1.IsOptional)(),
+    __metadata("design:type", String)
+], CreateOrganizationUserDto.prototype, "role", void 0);
+class BulkCreateOrganizationUsersDto {
+    users;
+}
+exports.BulkCreateOrganizationUsersDto = BulkCreateOrganizationUsersDto;
+__decorate([
+    (0, swagger_1.ApiProperty)({ type: [CreateOrganizationUserDto] }),
+    (0, class_validator_1.IsArray)(),
+    __metadata("design:type", Array)
+], BulkCreateOrganizationUsersDto.prototype, "users", void 0);
+class UpdateOrganizationUserDto extends (0, swagger_1.PartialType)((0, swagger_1.OmitType)(UpdateUserDto, ['organizationId'])) {
+}
+exports.UpdateOrganizationUserDto = UpdateOrganizationUserDto;
 //# sourceMappingURL=user.dto.js.map

@@ -22,6 +22,7 @@ let User = class User {
     organization;
     avatar;
     phone;
+    permissions;
     refreshToken;
     lastLoginAt;
     passwordResetToken;
@@ -60,6 +61,10 @@ __decorate([
     (0, mongoose_1.Prop)({ trim: true }),
     __metadata("design:type", String)
 ], User.prototype, "phone", void 0);
+__decorate([
+    (0, mongoose_1.Prop)({ type: [String], enum: enums_1.FeaturePermission, default: [] }),
+    __metadata("design:type", Array)
+], User.prototype, "permissions", void 0);
 __decorate([
     (0, mongoose_1.Prop)({ select: false }),
     __metadata("design:type", String)

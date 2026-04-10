@@ -9,7 +9,11 @@ export declare class UsersService {
     findAll(orgId?: string, status?: UserStatus): Promise<UserDocument[]>;
     findOne(id: string): Promise<UserDocument>;
     findByEmail(email: string, includePassword?: boolean): Promise<UserDocument | null>;
+    createByOrgAdmin(orgId: string, dto: CreateUserDto): Promise<UserDocument>;
+    bulkCreateByOrgAdmin(orgId: string, users: CreateUserDto[]): Promise<UserDocument[]>;
+    findAllByOrganization(orgId: string, status?: UserStatus): Promise<UserDocument[]>;
     update(id: string, dto: UpdateUserDto): Promise<UserDocument>;
+    updateByOrgAdmin(orgId: string, id: string, dto: UpdateUserDto): Promise<UserDocument>;
     changePassword(id: string, dto: ChangePasswordDto): Promise<void>;
     suspend(id: string): Promise<UserDocument>;
     activate(id: string): Promise<UserDocument>;
@@ -18,4 +22,5 @@ export declare class UsersService {
     validateRefreshToken(id: string, token: string): Promise<boolean>;
     remove(id: string): Promise<void>;
     seedSuperAdmin(email: string, password: string): Promise<void>;
+    private getResolvedPermissions;
 }

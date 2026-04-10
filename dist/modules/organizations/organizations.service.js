@@ -19,12 +19,15 @@ const mongoose_2 = require("mongoose");
 const organization_schema_1 = require("./schemas/organization.schema");
 const wallet_service_1 = require("../wallet/wallet.service");
 const enums_1 = require("../../common/enums");
+const users_service_1 = require("../users/users.service");
 let OrganizationsService = class OrganizationsService {
     orgModel;
     walletService;
-    constructor(orgModel, walletService) {
+    usersService;
+    constructor(orgModel, walletService, usersService) {
         this.orgModel = orgModel;
         this.walletService = walletService;
+        this.usersService = usersService;
     }
     generateSlug(name) {
         return name
@@ -34,7 +37,13 @@ let OrganizationsService = class OrganizationsService {
             .replace(/\s+/g, '-')
             .replace(/-+/g, '-');
     }
-    async create(dto) {
+    async create(dto, options = {}) {
+        const { createAdminUser = true } = options;
+        if (createAdminUser && (!dto.ownerEmail || !dto.ownerPassword)) {
+            throw new common_1.BadRequestException('ownerEmail and ownerPassword are required while creating organization');
+        }
+        const ownerEmail = dto.ownerEmail;
+        const ownerPassword = dto.ownerPassword;
         const slug = dto.slug || this.generateSlug(dto.name);
         const existing = await this.orgModel.findOne({ slug });
         if (existing)
@@ -48,6 +57,23 @@ let OrganizationsService = class OrganizationsService {
             timezone: dto.timezone || 'Asia/Kolkata',
         });
         const saved = await org.save();
+        if (createAdminUser) {
+            try {
+                await this.usersService.create({
+                    name: dto.ownerName || `${dto.name} Admin`,
+                    email: ownerEmail,
+                    password: ownerPassword,
+                    role: enums_1.Role.ORG_ADMIN,
+                    permissions: enums_1.ALL_FEATURE_PERMISSIONS,
+                    organizationId: saved._id.toString(),
+                    phone: dto.contact,
+                });
+            }
+            catch (error) {
+                await saved.deleteOne();
+                throw error;
+            }
+        }
         await this.walletService.initializeForOrg(saved._id.toString());
         return saved;
     }
@@ -106,6 +132,7 @@ exports.OrganizationsService = OrganizationsService = __decorate([
     (0, common_1.Injectable)(),
     __param(0, (0, mongoose_1.InjectModel)(organization_schema_1.Organization.name)),
     __metadata("design:paramtypes", [mongoose_2.Model,
-        wallet_service_1.WalletService])
+        wallet_service_1.WalletService,
+        users_service_1.UsersService])
 ], OrganizationsService);
 //# sourceMappingURL=organizations.service.js.map

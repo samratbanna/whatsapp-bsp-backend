@@ -64,11 +64,13 @@ let AuthService = class AuthService {
     async register(dto) {
         const org = await this.orgsService.create({
             name: dto.organizationName,
-        });
+        }, { createAdminUser: false });
         const user = await this.usersService.create({
             name: dto.name,
             email: dto.email,
             password: dto.password,
+            role: enums_1.Role.ORG_ADMIN,
+            permissions: enums_1.ALL_FEATURE_PERMISSIONS,
             organizationId: org._id.toString(),
         });
         const tokens = await this.generateTokens(user);
@@ -118,6 +120,7 @@ let AuthService = class AuthService {
             email: user.email,
             role: user.role,
             orgId: user.organization?._id?.toString() || user.organization?.toString() || null,
+            permissions: user.permissions || [],
         };
         const [accessToken, refreshToken] = await Promise.all([
             this.jwtService.signAsync(payload, {

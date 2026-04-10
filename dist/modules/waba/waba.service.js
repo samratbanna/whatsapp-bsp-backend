@@ -76,6 +76,12 @@ let WabaService = class WabaService {
             .select('-accessToken')
             .exec();
     }
+    async findAll() {
+        return this.wabaModel
+            .find()
+            .select('-accessToken')
+            .exec();
+    }
     async findOne(id, orgId) {
         const filter = { _id: id };
         if (orgId)

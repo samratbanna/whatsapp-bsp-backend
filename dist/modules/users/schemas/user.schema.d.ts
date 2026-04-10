@@ -1,5 +1,5 @@
 import { Document, Types } from 'mongoose';
-import { Role, UserStatus } from '../../../common/enums';
+import { FeaturePermission, Role, UserStatus } from '../../../common/enums';
 export type UserDocument = User & Document;
 export declare class User {
     name: string;
@@ -10,6 +10,7 @@ export declare class User {
     organization: Types.ObjectId | null;
     avatar?: string;
     phone?: string;
+    permissions: FeaturePermission[];
     refreshToken?: string;
     lastLoginAt?: Date;
     passwordResetToken?: string;
@@ -88,6 +89,15 @@ export declare const UserSchema: import("mongoose").Schema<User, import("mongoos
         id: string;
     }> | undefined;
     phone?: import("mongoose").SchemaDefinitionProperty<string | undefined, User, Document<unknown, {}, User, {
+        id: string;
+    }, import("mongoose").DefaultSchemaOptions> & Omit<User & {
+        _id: Types.ObjectId;
+    } & {
+        __v: number;
+    }, "id"> & {
+        id: string;
+    }> | undefined;
+    permissions?: import("mongoose").SchemaDefinitionProperty<FeaturePermission[], User, Document<unknown, {}, User, {
         id: string;
     }, import("mongoose").DefaultSchemaOptions> & Omit<User & {
         _id: Types.ObjectId;

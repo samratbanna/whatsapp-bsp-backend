@@ -1,6 +1,34 @@
 import { Document, Types } from 'mongoose';
 import { OrgStatus } from '../../../common/enums';
 export type OrganizationDocument = Organization & Document;
+export declare class InvoiceBusinessDetails {
+    legalBusinessName?: string;
+    tradeName?: string;
+    gstin?: string;
+    pan?: string;
+    cin?: string;
+    udyamNumber?: string;
+    addressLine1?: string;
+    addressLine2?: string;
+    city?: string;
+    state?: string;
+    pinCode?: string;
+    country?: string;
+    contactEmail?: string;
+    contactPhone?: string;
+    bankAccountName?: string;
+    bankAccountNumber?: string;
+    bankName?: string;
+    ifscCode?: string;
+    bankBranch?: string;
+}
+export declare class LoginUserDetails {
+    userId?: string;
+    name?: string;
+    email?: string;
+    phone?: string;
+    designation?: string;
+}
 export declare class Organization {
     name: string;
     slug: string;
@@ -16,6 +44,8 @@ export declare class Organization {
     address?: string;
     country?: string;
     timezone: string;
+    businessDetails?: InvoiceBusinessDetails;
+    loginUserDetails?: LoginUserDetails;
 }
 export declare const OrganizationSchema: import("mongoose").Schema<Organization, import("mongoose").Model<Organization, any, any, any, any, any, Organization>, {}, {}, {}, {}, import("mongoose").DefaultSchemaOptions, Organization, Document<unknown, {}, Organization, {
     id: string;
@@ -144,6 +174,24 @@ export declare const OrganizationSchema: import("mongoose").Schema<Organization,
         id: string;
     }> | undefined;
     timezone?: import("mongoose").SchemaDefinitionProperty<string, Organization, Document<unknown, {}, Organization, {
+        id: string;
+    }, import("mongoose").DefaultSchemaOptions> & Omit<Organization & {
+        _id: Types.ObjectId;
+    } & {
+        __v: number;
+    }, "id"> & {
+        id: string;
+    }> | undefined;
+    businessDetails?: import("mongoose").SchemaDefinitionProperty<InvoiceBusinessDetails | undefined, Organization, Document<unknown, {}, Organization, {
+        id: string;
+    }, import("mongoose").DefaultSchemaOptions> & Omit<Organization & {
+        _id: Types.ObjectId;
+    } & {
+        __v: number;
+    }, "id"> & {
+        id: string;
+    }> | undefined;
+    loginUserDetails?: import("mongoose").SchemaDefinitionProperty<LoginUserDetails | undefined, Organization, Document<unknown, {}, Organization, {
         id: string;
     }, import("mongoose").DefaultSchemaOptions> & Omit<Organization & {
         _id: Types.ObjectId;

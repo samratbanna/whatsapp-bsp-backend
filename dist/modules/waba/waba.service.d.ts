@@ -9,6 +9,7 @@ export declare class WabaService {
     connect(orgId: string, dto: ConnectWabaDto): Promise<WabaDocument>;
     assignShared(dto: AssignSharedWabaDto): Promise<WabaDocument>;
     findByOrg(orgId: string): Promise<WabaDocument[]>;
+    findAll(): Promise<WabaDocument[]>;
     findOne(id: string, orgId?: string): Promise<WabaDocument>;
     findDefaultForOrg(orgId: string): Promise<WabaDocument | null>;
     findByPhoneNumberId(phoneNumberId: string): Promise<WabaDocument | null>;

@@ -5,9 +5,15 @@ import {
   IsEnum,
   MinLength,
   Matches,
+  IsArray,
 } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { Role, UserStatus } from '../../../common/enums';
+import {
+  ApiProperty,
+  ApiPropertyOptional,
+  OmitType,
+  PartialType,
+} from '@nestjs/swagger';
+import { FeaturePermission, Role, UserStatus } from '../../../common/enums';
 
 export class CreateUserDto {
   @ApiProperty({ example: 'John Doe' })
@@ -41,6 +47,12 @@ export class CreateUserDto {
   @IsString()
   @IsOptional()
   phone?: string;
+
+  @ApiPropertyOptional({ enum: FeaturePermission, isArray: true })
+  @IsArray()
+  @IsEnum(FeaturePermission, { each: true })
+  @IsOptional()
+  permissions?: FeaturePermission[];
 }
 
 export class UpdateUserDto extends PartialType(CreateUserDto) {
@@ -63,3 +75,23 @@ export class ChangePasswordDto {
   })
   newPassword: string;
 }
+
+export class CreateOrganizationUserDto extends OmitType(CreateUserDto, [
+  'organizationId',
+  'role',
+] as const) {
+  @ApiPropertyOptional({ enum: Role, default: Role.AGENT })
+  @IsEnum(Role)
+  @IsOptional()
+  role?: Role;
+}
+
+export class BulkCreateOrganizationUsersDto {
+  @ApiProperty({ type: [CreateOrganizationUserDto] })
+  @IsArray()
+  users: CreateOrganizationUserDto[];
+}
+
+export class UpdateOrganizationUserDto extends PartialType(
+  OmitType(UpdateUserDto, ['organizationId'] as const),
+) {}
