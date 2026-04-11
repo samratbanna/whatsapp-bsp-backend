@@ -5,6 +5,9 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -12,11 +15,36 @@ var MetaApiService_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MetaApiService = void 0;
 const common_1 = require("@nestjs/common");
+const config_1 = require("@nestjs/config");
 const axios_1 = __importDefault(require("axios"));
 const META_API_VERSION = 'v19.0';
 const META_BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
 let MetaApiService = MetaApiService_1 = class MetaApiService {
+    config;
     logger = new common_1.Logger(MetaApiService_1.name);
+    constructor(config) {
+        this.config = config;
+    }
+    isTokenExpiredError(err) {
+        return err?.response?.data?.error?.code === 190;
+    }
+    async exchangeForLongLivedToken(currentToken) {
+        const appId = this.config.get('META_APP_ID');
+        const appSecret = this.config.get('META_APP_SECRET');
+        const res = await axios_1.default.get(`${META_BASE_URL}/oauth/access_token`, {
+            params: {
+                grant_type: 'fb_exchange_token',
+                client_id: appId,
+                client_secret: appSecret,
+                fb_exchange_token: currentToken,
+            },
+        });
+        const newToken = res.data?.access_token;
+        if (!newToken)
+            throw new common_1.BadRequestException('Meta token exchange returned no access_token');
+        this.logger.log('Meta long-lived token refreshed successfully');
+        return newToken;
+    }
     client(accessToken) {
         return axios_1.default.create({
             baseURL: META_BASE_URL,
@@ -122,6 +150,7 @@ let MetaApiService = MetaApiService_1 = class MetaApiService {
 };
 exports.MetaApiService = MetaApiService;
 exports.MetaApiService = MetaApiService = MetaApiService_1 = __decorate([
-    (0, common_1.Injectable)()
+    (0, common_1.Injectable)(),
+    __metadata("design:paramtypes", [config_1.ConfigService])
 ], MetaApiService);
 //# sourceMappingURL=meta-api.service.js.map

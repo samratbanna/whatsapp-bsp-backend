@@ -138,6 +138,9 @@ let WabaService = class WabaService {
         if (result.deletedCount === 0)
             throw new common_1.NotFoundException('WABA not found');
     }
+    async updateAccessToken(wabaId, newToken) {
+        await this.wabaModel.updateOne({ _id: wabaId }, { accessToken: newToken });
+    }
 };
 exports.WabaService = WabaService;
 exports.WabaService = WabaService = __decorate([

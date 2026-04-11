@@ -16,4 +16,5 @@ export declare class WabaService {
     update(id: string, orgId: string, dto: UpdateWabaDto): Promise<WabaDocument>;
     disconnect(id: string, orgId: string): Promise<WabaDocument>;
     remove(id: string, orgId: string): Promise<void>;
+    updateAccessToken(wabaId: string, newToken: string): Promise<void>;
 }

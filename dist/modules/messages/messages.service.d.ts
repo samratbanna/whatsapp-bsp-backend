@@ -11,6 +11,7 @@ export declare class MessagesService {
     private walletService;
     private readonly logger;
     constructor(messageModel: Model<MessageDocument>, wabaService: WabaService, metaApi: MetaApiService, walletService: WalletService);
+    private sendWithAutoRefresh;
     sendText(orgId: string, dto: SendTextDto): Promise<MessageDocument>;
     sendTemplate(orgId: string, dto: SendTemplateDto): Promise<MessageDocument>;
     sendMedia(orgId: string, dto: SendMediaDto): Promise<MessageDocument>;

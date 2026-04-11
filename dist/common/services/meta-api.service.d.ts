@@ -1,5 +1,10 @@
+import { ConfigService } from '@nestjs/config';
 export declare class MetaApiService {
+    private readonly config;
     private readonly logger;
+    constructor(config: ConfigService);
+    isTokenExpiredError(err: any): boolean;
+    exchangeForLongLivedToken(currentToken: string): Promise<string>;
     private client;
     sendMessage(phoneNumberId: string, accessToken: string, payload: any): Promise<any>;
     getTemplates(wabaId: string, accessToken: string): Promise<any>;

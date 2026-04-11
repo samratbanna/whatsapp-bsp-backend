@@ -1,4 +1,5 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance } from 'axios';
 
 const META_API_VERSION = 'v19.0';
@@ -7,6 +8,34 @@ const META_BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
 @Injectable()
 export class MetaApiService {
   private readonly logger = new Logger(MetaApiService.name);
+
+  constructor(private readonly config: ConfigService) {}
+
+  /** Returns true when the Meta error is an expired/invalid OAuth token (code 190). */
+  isTokenExpiredError(err: any): boolean {
+    return err?.response?.data?.error?.code === 190;
+  }
+
+  /**
+   * Exchanges any valid Meta user access token for a long-lived token (~60 days).
+   * Uses META_APP_ID + META_APP_SECRET from environment.
+   */
+  async exchangeForLongLivedToken(currentToken: string): Promise<string> {
+    const appId = this.config.get<string>('META_APP_ID');
+    const appSecret = this.config.get<string>('META_APP_SECRET');
+    const res = await axios.get(`${META_BASE_URL}/oauth/access_token`, {
+      params: {
+        grant_type: 'fb_exchange_token',
+        client_id: appId,
+        client_secret: appSecret,
+        fb_exchange_token: currentToken,
+      },
+    });
+    const newToken = res.data?.access_token;
+    if (!newToken) throw new BadRequestException('Meta token exchange returned no access_token');
+    this.logger.log('Meta long-lived token refreshed successfully');
+    return newToken;
+  }
 
   private client(accessToken: string): AxiosInstance {
     return axios.create({

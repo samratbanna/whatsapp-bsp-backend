@@ -22,6 +22,37 @@ export class MessagesService {
     private walletService: WalletService,
   ) {}
 
+  /**
+   * Calls metaApi.sendMessage. On token expiry (Meta error code 190):
+   *   1. Exchanges the expired token for a fresh long-lived token.
+   *   2. Persists the new token to MongoDB.
+   *   3. Retries the send exactly once.
+   */
+  private async sendWithAutoRefresh(
+    waba: any,
+    payload: any,
+  ): Promise<any> {
+    try {
+      return await this.metaApi.sendMessage(waba.phoneNumberId, waba.accessToken, payload);
+    } catch (err: any) {
+      if (!this.metaApi.isTokenExpiredError(err)) throw err;
+
+      this.logger.warn(`WABA ${waba._id}: Meta token expired — exchanging for long-lived token`);
+      let newToken: string;
+      try {
+        newToken = await this.metaApi.exchangeForLongLivedToken(waba.accessToken);
+      } catch (refreshErr: any) {
+        this.logger.error(`WABA ${waba._id}: token refresh failed`, refreshErr?.response?.data);
+        throw err; // rethrow original expiry error
+      }
+
+      await this.wabaService.updateAccessToken(waba._id.toString(), newToken);
+      this.logger.log(`WABA ${waba._id}: access token updated in DB — retrying send`);
+
+      return this.metaApi.sendMessage(waba.phoneNumberId, newToken, payload);
+    }
+  }
+
   // ── Send text message ──────────────────────────────────────────────
   async sendText(orgId: string, dto: SendTextDto): Promise<MessageDocument> {
     const waba = dto.wabaId
@@ -41,11 +72,7 @@ export class MessagesService {
       text: { body: dto.text, preview_url: false },
     };
 
-    const result = await this.metaApi.sendMessage(
-      waba.phoneNumberId,
-      waba.accessToken,
-      payload,
-    );
+    const result = await this.sendWithAutoRefresh(waba, payload);
 
     return this.messageModel.create({
       organization: new Types.ObjectId(orgId),
@@ -85,11 +112,7 @@ export class MessagesService {
       },
     };
 
-    const result = await this.metaApi.sendMessage(
-      waba.phoneNumberId,
-      waba.accessToken,
-      payload,
-    );
+    const result = await this.sendWithAutoRefresh(waba, payload);
 
     return this.messageModel.create({
       organization: new Types.ObjectId(orgId),
@@ -133,11 +156,7 @@ export class MessagesService {
       },
     };
 
-    const result = await this.metaApi.sendMessage(
-      waba.phoneNumberId,
-      waba.accessToken,
-      payload,
-    );
+    const result = await this.sendWithAutoRefresh(waba, payload);
 
     return this.messageModel.create({
       organization: new Types.ObjectId(orgId),

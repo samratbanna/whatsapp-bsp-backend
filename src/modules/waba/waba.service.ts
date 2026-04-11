@@ -162,4 +162,9 @@ export class WabaService {
     });
     if (result.deletedCount === 0) throw new NotFoundException('WABA not found');
   }
+
+  /** Directly overwrites the stored access token — no orgId guard needed (token refresh path). */
+  async updateAccessToken(wabaId: string, newToken: string): Promise<void> {
+    await this.wabaModel.updateOne({ _id: wabaId }, { accessToken: newToken });
+  }
 }
