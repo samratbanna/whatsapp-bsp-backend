@@ -137,6 +137,4 @@ exports.Message = Message = __decorate([
 ], Message);
 exports.MessageSchema = mongoose_1.SchemaFactory.createForClass(Message);
 exports.MessageSchema.index({ organization: 1, from: 1, createdAt: -1 });
-exports.MessageSchema.index({ metaMessageId: 1 });
-exports.MessageSchema.index({ organization: 1, createdAt: -1 });
 //# sourceMappingURL=message.schema.js.map

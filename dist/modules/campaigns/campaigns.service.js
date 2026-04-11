@@ -40,7 +40,7 @@ let CampaignsService = CampaignsService_1 = class CampaignsService {
         if (!dto.contacts?.length && !dto.groups?.length) {
             throw new common_1.BadRequestException('Provide at least one contact or group');
         }
-        return this.campaignModel.create({
+        const campaign = await this.campaignModel.create({
             organization: new mongoose_2.Types.ObjectId(orgId),
             waba: waba._id,
             name: dto.name,
@@ -54,6 +54,7 @@ let CampaignsService = CampaignsService_1 = class CampaignsService {
             messagesPerSecond: dto.messagesPerSecond || 10,
             status: campaign_schema_1.CampaignStatus.DRAFT,
         });
+        return this.launch(campaign._id.toString(), orgId);
     }
     async launch(id, orgId) {
         const campaign = await this.findOne(id, orgId);
@@ -63,13 +64,21 @@ let CampaignsService = CampaignsService_1 = class CampaignsService {
         const delay = campaign.scheduledAt
             ? Math.max(0, campaign.scheduledAt.getTime() - Date.now())
             : 0;
-        const job = await this.campaignQueue.add('broadcast', { campaignId: id, orgId }, {
-            delay,
-            attempts: 1,
-            removeOnComplete: false,
-            removeOnFail: false,
-            jobId: `campaign-${id}`,
-        });
+        this.logger.log(`[Campaign] Adding job to queue: campaignId=${id}, delay=${delay}ms`);
+        let job;
+        try {
+            job = await this.campaignQueue.add('broadcast', { campaignId: id, orgId }, {
+                delay,
+                attempts: 1,
+                removeOnComplete: false,
+                removeOnFail: false,
+            });
+            this.logger.log(`[Campaign] Job added to queue: jobId=${job.id}`);
+        }
+        catch (queueErr) {
+            this.logger.error(`[Campaign] Failed to add job to queue: ${queueErr.message}`, queueErr.stack);
+            throw queueErr;
+        }
         campaign.status = delay > 0 ? campaign_schema_1.CampaignStatus.SCHEDULED : campaign_schema_1.CampaignStatus.RUNNING;
         campaign.jobId = job.id;
         return campaign.save();

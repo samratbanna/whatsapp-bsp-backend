@@ -31,7 +31,7 @@ export class CampaignsService {
       throw new BadRequestException('Provide at least one contact or group');
     }
 
-    return this.campaignModel.create({
+    const campaign = await this.campaignModel.create({
       organization: new Types.ObjectId(orgId),
       waba: waba._id,
       name: dto.name,
@@ -45,6 +45,9 @@ export class CampaignsService {
       messagesPerSecond: dto.messagesPerSecond || 10,
       status: CampaignStatus.DRAFT,
     });
+
+    // Auto-launch immediately after creation (scheduledAt still respected via queue delay).
+    return this.launch((campaign._id as Types.ObjectId).toString(), orgId);
   }
 
   async launch(id: string, orgId: string): Promise<CampaignDocument> {
@@ -58,17 +61,24 @@ export class CampaignsService {
       ? Math.max(0, campaign.scheduledAt.getTime() - Date.now())
       : 0;
 
-    const job = await this.campaignQueue.add(
-      'broadcast',
-      { campaignId: id, orgId },
-      {
-        delay,
-        attempts: 1,
-        removeOnComplete: false,
-        removeOnFail: false,
-        jobId: `campaign-${id}`,
-      },
-    );
+    this.logger.log(`[Campaign] Adding job to queue: campaignId=${id}, delay=${delay}ms`);
+    let job: any;
+    try {
+      job = await this.campaignQueue.add(
+        'broadcast',
+        { campaignId: id, orgId },
+        {
+          delay,
+          attempts: 1,
+          removeOnComplete: false,
+          removeOnFail: false,
+        },
+      );
+      this.logger.log(`[Campaign] Job added to queue: jobId=${job.id}`);
+    } catch (queueErr: any) {
+      this.logger.error(`[Campaign] Failed to add job to queue: ${queueErr.message}`, queueErr.stack);
+      throw queueErr;
+    }
 
     campaign.status = delay > 0 ? CampaignStatus.SCHEDULED : CampaignStatus.RUNNING;
     campaign.jobId = job.id as string;

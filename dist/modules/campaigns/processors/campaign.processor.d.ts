@@ -24,4 +24,5 @@ export declare class CampaignProcessor {
     private collectPhones;
     private resolveVariables;
     private sleep;
+    private getErrorMessage;
 }

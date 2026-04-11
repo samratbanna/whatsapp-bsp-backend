@@ -109,5 +109,3 @@ export class Message {
 
 export const MessageSchema = SchemaFactory.createForClass(Message);
 MessageSchema.index({ organization: 1, from: 1, createdAt: -1 });
-MessageSchema.index({ metaMessageId: 1 });
-MessageSchema.index({ organization: 1, createdAt: -1 });

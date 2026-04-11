@@ -19,7 +19,7 @@ export class CreateCampaignDto {
   @IsString()
   templateId: string;
 
-  @ApiProperty({ example: 'en_US' })
+  @ApiProperty({ example: 'en_US', default: 'en_US' })
   @IsString()
   templateLanguage: string;
 

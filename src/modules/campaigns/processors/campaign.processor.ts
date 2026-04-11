@@ -9,7 +9,6 @@ import { WabaService } from '../../waba/waba.service';
 import { MetaApiService } from '../../../common/services/meta-api.service';
 import { MessagesService } from '../../messages/messages.service';
 import { WalletService } from '../../wallet/wallet.service';
-import { WalletCategory } from '../../wallet/schemas/wallet.schema';
 import { MessageDirection, MessageStatus, MessageType } from '../../messages/schemas/message.schema';
 
 export const CAMPAIGN_QUEUE = 'campaign';
@@ -34,6 +33,8 @@ export class CampaignProcessor {
 
   @Process('broadcast')
   async handleBroadcast(job: Job<CampaignJobData>) {
+    this.logger.log(`[Processor] handleBroadcast called, jobId=${job.id}`);
+
     const { campaignId, orgId } = job.data;
 
     const campaign = await this.campaignModel
@@ -99,10 +100,11 @@ export class CampaignProcessor {
                 orgId, walletCat,
                 undefined, (campaign._id as any).toString(),
               );
-            } catch (walletErr) {
-              this.logger.warn(`Campaign ${campaignId} stopped at ${i} — ${walletErr.message}`);
+            } catch (walletErr: any) {
+              const message = this.getErrorMessage(walletErr);
+              this.logger.warn(`Campaign ${campaignId} stopped at ${i} - ${message}`);
               campaign.status = CampaignStatus.PAUSED;
-              campaign.failureReason = walletErr.message;
+              campaign.failureReason = message;
               await campaign.save();
               break;
             }
@@ -150,8 +152,8 @@ export class CampaignProcessor {
           });
 
           campaign.sentCount++;
-        } catch (err) {
-          this.logger.warn(`Failed to send to ${phone}: ${err.message}`);
+        } catch (err: any) {
+          this.logger.warn(`Failed to send to ${phone}: ${this.getErrorMessage(err)}`);
           campaign.failedCount++;
         }
 
@@ -174,10 +176,11 @@ export class CampaignProcessor {
       this.logger.log(
         `Campaign ${campaignId} completed: ${campaign.sentCount} sent, ${campaign.failedCount} failed`,
       );
-    } catch (err) {
-      this.logger.error(`Campaign ${campaignId} failed: ${err.message}`);
+    } catch (err: any) {
+      const message = this.getErrorMessage(err);
+      this.logger.error(`Campaign ${campaignId} failed: ${message}`);
       campaign.status = CampaignStatus.FAILED;
-      campaign.failureReason = err.message;
+      campaign.failureReason = message;
       await campaign.save();
     }
   }
@@ -252,5 +255,10 @@ export class CampaignProcessor {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    return typeof error === 'string' ? error : 'Unknown error';
   }
 }
