@@ -127,10 +127,14 @@ export class CampaignProcessor {
             },
           };
 
-          const result = await this.metaApi.sendMessage(
+          const result = await this.metaApi.sendMessageAutoRefresh(
             waba.phoneNumberId,
             waba.accessToken,
             payload,
+            async (newToken) => {
+              waba.accessToken = newToken;
+              await this.wabaService.updateAccessToken(waba._id.toString(), newToken);
+            },
           );
 
           // Store message record
@@ -153,6 +157,16 @@ export class CampaignProcessor {
 
           campaign.sentCount++;
         } catch (err: any) {
+          if (this.metaApi.isTokenExpiredError(err)) {
+            this.logger.error(
+              `Campaign ${campaignId}: WABA token permanently expired — aborting campaign`,
+            );
+            await this.wabaService.markTokenExpired(waba._id.toString());
+            campaign.status = CampaignStatus.FAILED;
+            campaign.failureReason = 'Meta access token has expired. Reconnect your WABA.';
+            await campaign.save();
+            return;
+          }
           this.logger.warn(`Failed to send to ${phone}: ${this.getErrorMessage(err)}`);
           campaign.failedCount++;
         }
@@ -226,31 +240,103 @@ export class CampaignProcessor {
     }));
   }
 
-  // ── Resolve {{contact.name}} etc in template variables ────────────
+  // ── Build send-time template components from stored template + variables ─
+  /**
+   * The stored template.components use the Meta "template definition" shape:
+   *   { type: 'HEADER'|'BODY'|'FOOTER'|'BUTTONS', format?, text, buttons, example }
+   *
+   * The Meta "send message" API expects a completely different shape:
+   *   { type: 'header'|'body'|'footer'|'button', parameters: [{type:'text', text:'...'}] }
+   *
+   * This method converts the former into the latter, substituting variable
+   * placeholders ({{1}}, {{2}}, {{contact.name}}, etc.) for the actual values.
+   */
   private resolveVariables(
     components: any[],
     staticVars: Record<string, string>,
     contact: any,
   ): any[] {
-    const resolve = (val: string) =>
+    const interpolate = (val: string): string =>
       val
         .replace(/\{\{contact\.name\}\}/g, contact?.name || '')
         .replace(/\{\{contact\.phone\}\}/g, contact?.phone || '');
 
-    return components.map((comp) => {
-      if (!comp.parameters) return comp;
-      return {
-        ...comp,
-        parameters: comp.parameters.map((param: any) => {
-          if (param.type === 'text') {
-            const key = param.text?.replace(/\{\{(\d+)\}\}/, '$1');
-            const val = staticVars[key] || param.text || '';
-            return { ...param, text: resolve(val) };
+    const resolveText = (text: string): string => {
+      // Replace {{N}} placeholders with staticVars[N], then apply contact tokens.
+      const withStatic = text.replace(/\{\{(\d+)\}\}/g, (_, n) => staticVars[n] ?? `{{${n}}}`);
+      return interpolate(withStatic);
+    };
+
+    const result: any[] = [];
+
+    for (const comp of components) {
+      const typeRaw: string = (comp.type || '').toUpperCase();
+
+      if (typeRaw === 'FOOTER') continue; // footer has no send-time parameters
+
+      if (typeRaw === 'BUTTONS') {
+        // Quick-reply / URL buttons with dynamic part (index-based)
+        const buttons = comp.buttons || [];
+        buttons.forEach((btn: any, idx: number) => {
+          if (btn.type === 'QUICK_REPLY') {
+            result.push({
+              type: 'button',
+              sub_type: 'quick_reply',
+              index: idx,
+              parameters: [{ type: 'payload', payload: btn.text || '' }],
+            });
+          } else if (btn.type === 'URL' && btn.url && /\{\{\d+\}\}/.test(btn.url)) {
+            // Dynamic URL suffix
+            const suffix = resolveText(btn.url.replace(/^.*\{\{\d+\}\}/, ''));
+            result.push({
+              type: 'button',
+              sub_type: 'url',
+              index: idx,
+              parameters: [{ type: 'text', text: suffix }],
+            });
           }
-          return param;
-        }),
-      };
-    });
+          // Static URL / PHONE_NUMBER buttons need no parameters
+        });
+        continue;
+      }
+
+      // HEADER / BODY
+      const sendType = typeRaw.toLowerCase() as 'header' | 'body';
+      const formatRaw: string = (comp.format || 'TEXT').toUpperCase();
+
+      if (typeRaw === 'HEADER' && formatRaw !== 'TEXT') {
+        // Media header — parameters is a single media object
+        const mediaType = formatRaw.toLowerCase() as 'image' | 'video' | 'document';
+        const link =
+          staticVars['header_url'] ||
+          staticVars['1'] ||
+          comp.example?.header_handle?.[0] ||
+          '';
+        if (link) {
+          result.push({
+            type: sendType,
+            parameters: [{ type: mediaType, [mediaType]: { link } }],
+          });
+        }
+        continue;
+      }
+
+      // TEXT header or BODY — extract {{N}} placeholders from stored text
+      const storedText: string = comp.text || '';
+      const placeholders = [...storedText.matchAll(/\{\{(\d+)\}\}/g)].map((m) => m[1]);
+
+      if (placeholders.length === 0) continue; // static text — no parameters needed
+
+      result.push({
+        type: sendType,
+        parameters: placeholders.map((n) => ({
+          type: 'text',
+          text: resolveText(`{{${n}}}`),
+        })),
+      });
+    }
+
+    return result;
   }
 
   private sleep(ms: number): Promise<void> {

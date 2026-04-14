@@ -65,6 +65,10 @@ export class Waba {
   // SHARED → wallet deducted per message
   @Prop({ default: true })
   walletBillingEnabled: boolean;
+
+  // Token lifecycle — used by the proactive refresh cron job
+  @Prop()
+  tokenIssuedAt?: Date;
 }
 
 export const WabaSchema = SchemaFactory.createForClass(Waba);

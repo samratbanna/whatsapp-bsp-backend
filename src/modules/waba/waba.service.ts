@@ -1,9 +1,11 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Waba, WabaDocument, WabaStatus, WabaOwnershipType } from './schemas/waba.schema';
@@ -12,6 +14,8 @@ import { MetaApiService } from '../../common/services/meta-api.service';
 
 @Injectable()
 export class WabaService {
+  private readonly logger = new Logger(WabaService.name);
+
   constructor(
     @InjectModel(Waba.name) private wabaModel: Model<WabaDocument>,
     private metaApi: MetaApiService,
@@ -22,6 +26,18 @@ export class WabaService {
       dto.phoneNumberId,
       dto.accessToken,
     );
+
+    // Exchange the submitted token for a long-lived (~60 day) token immediately.
+    let resolvedToken = dto.accessToken;
+    let tokenIssuedAt = new Date();
+    try {
+      const refreshed = await this.metaApi.exchangeForLongLivedToken(dto.accessToken);
+      resolvedToken = refreshed.token;
+      tokenIssuedAt = new Date();
+    } catch (e: any) {
+      // If the exchange fails the token may already be long-lived or a system
+      // user token — store it as-is and let it fail at send time if invalid.
+    }
 
     if (dto.isDefault !== false) {
       await this.wabaModel.updateMany(
@@ -41,7 +57,8 @@ export class WabaService {
       ownershipType: dto.ownershipType || WabaOwnershipType.BYO,
       wabaId: dto.wabaId,
       phoneNumberId: dto.phoneNumberId,
-      accessToken: dto.accessToken,
+      accessToken: resolvedToken,
+      tokenIssuedAt,
       displayPhoneNumber: phoneInfo.display_phone_number,
       verifiedName: phoneInfo.verified_name,
       qualityRating: phoneInfo.quality_rating,
@@ -62,6 +79,17 @@ export class WabaService {
       dto.accessToken,
     );
 
+    // Exchange for a long-lived token immediately.
+    let resolvedToken = dto.accessToken;
+    let tokenIssuedAt = new Date();
+    try {
+      const refreshed = await this.metaApi.exchangeForLongLivedToken(dto.accessToken);
+      resolvedToken = refreshed.token;
+      tokenIssuedAt = new Date();
+    } catch (e: any) {
+      // Already long-lived / system user token — keep as-is.
+    }
+
     await this.wabaModel.updateMany(
       { organization: new Types.ObjectId(dto.orgId) },
       { isDefault: false },
@@ -72,7 +100,8 @@ export class WabaService {
       ownershipType: WabaOwnershipType.SHARED,
       wabaId: dto.wabaId,
       phoneNumberId: dto.phoneNumberId,
-      accessToken: dto.accessToken,
+      accessToken: resolvedToken,
+      tokenIssuedAt,
       displayPhoneNumber: phoneInfo.display_phone_number,
       verifiedName: phoneInfo.verified_name,
       qualityRating: phoneInfo.quality_rating,
@@ -163,8 +192,68 @@ export class WabaService {
     if (result.deletedCount === 0) throw new NotFoundException('WABA not found');
   }
 
-  /** Directly overwrites the stored access token — no orgId guard needed (token refresh path). */
+  /** Directly overwrites the stored access token and stamps the issue timestamp. */
   async updateAccessToken(wabaId: string, newToken: string): Promise<void> {
-    await this.wabaModel.updateOne({ _id: wabaId }, { accessToken: newToken });
+    await this.wabaModel.updateOne(
+      { _id: wabaId },
+      { accessToken: newToken, tokenIssuedAt: new Date() },
+    );
+  }
+
+  /** Marks the WABA as DISCONNECTED when the Meta token is permanently expired. */
+  async markTokenExpired(wabaId: string): Promise<void> {
+    await this.wabaModel.updateOne(
+      { _id: wabaId },
+      { status: WabaStatus.DISCONNECTED },
+    );
+  }
+
+  /**
+   * Proactive token refresh — runs daily at 03:00.
+   * Refreshes tokens for all ACTIVE WABAs whose token was issued more than 50 days ago
+   * (Meta long-lived tokens last ~60 days; refreshing at 50 days gives a 10-day safety window).
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  async proactiveTokenRefresh(): Promise<void> {
+    const fiftyDaysAgo = new Date(Date.now() - 50 * 24 * 60 * 60 * 1000);
+
+    const stalWabas = await this.wabaModel
+      .find({
+        status: WabaStatus.ACTIVE,
+        $or: [
+          { tokenIssuedAt: { $lte: fiftyDaysAgo } },
+          { tokenIssuedAt: { $exists: false } },
+        ],
+      })
+      .select('+accessToken')
+      .exec();
+
+    if (!stalWabas.length) {
+      this.logger.log('Proactive token refresh: no stale tokens found');
+      return;
+    }
+
+    this.logger.log(`Proactive token refresh: checking ${stalWabas.length} WABA(s) with tokens ≥50 days old`);
+
+    for (const waba of stalWabas) {
+      try {
+        const { token } = await this.metaApi.exchangeForLongLivedToken(waba.accessToken);
+        await this.updateAccessToken(waba._id.toString(), token);
+        this.logger.log(
+          `Proactive token refresh: refreshed WABA ${waba._id} (phoneNumberId=${waba.phoneNumberId})`,
+        );
+      } catch (err: any) {
+        if (this.metaApi.isTokenExpiredError(err)) {
+          this.logger.error(
+            `Proactive token refresh: WABA ${waba._id} token is fully expired — marking DISCONNECTED`,
+          );
+          await this.markTokenExpired(waba._id.toString());
+        } else {
+          this.logger.warn(
+            `Proactive token refresh: failed for WABA ${waba._id} — ${err?.message ?? err}`,
+          );
+        }
+      }
+    }
   }
 }

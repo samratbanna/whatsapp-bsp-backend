@@ -10,6 +10,7 @@ import { WabaService } from '../waba/waba.service';
 import { MetaApiService } from '../../common/services/meta-api.service';
 import { WalletService } from '../wallet/wallet.service';
 import { WalletCategory } from '../wallet/schemas/wallet.schema';
+import { WabaStatus } from '../waba/schemas/waba.schema';
 
 @Injectable()
 export class MessagesService {
@@ -23,33 +24,30 @@ export class MessagesService {
   ) {}
 
   /**
-   * Calls metaApi.sendMessage. On token expiry (Meta error code 190):
-   *   1. Exchanges the expired token for a fresh long-lived token.
-   *   2. Persists the new token to MongoDB.
-   *   3. Retries the send exactly once.
+   * Delegates to sendMessageAutoRefresh. On successful token exchange the new
+   * token is persisted. If the token is fully expired and cannot be refreshed,
+   * the WABA is marked DISCONNECTED before re-throwing.
    */
-  private async sendWithAutoRefresh(
-    waba: any,
-    payload: any,
-  ): Promise<any> {
+  private async sendWithAutoRefresh(waba: any, payload: any): Promise<any> {
     try {
-      return await this.metaApi.sendMessage(waba.phoneNumberId, waba.accessToken, payload);
+      return await this.metaApi.sendMessageAutoRefresh(
+        waba.phoneNumberId,
+        waba.accessToken,
+        payload,
+        async (newToken) => {
+          waba.accessToken = newToken; // update in-memory reference too
+          await this.wabaService.updateAccessToken(waba._id.toString(), newToken);
+          this.logger.log(`WABA ${waba._id}: access token refreshed and persisted`);
+        },
+      );
     } catch (err: any) {
-      if (!this.metaApi.isTokenExpiredError(err)) throw err;
-
-      this.logger.warn(`WABA ${waba._id}: Meta token expired — exchanging for long-lived token`);
-      let newToken: string;
-      try {
-        newToken = await this.metaApi.exchangeForLongLivedToken(waba.accessToken);
-      } catch (refreshErr: any) {
-        this.logger.error(`WABA ${waba._id}: token refresh failed`, refreshErr?.response?.data);
-        throw err; // rethrow original expiry error
+      if (this.metaApi.isTokenExpiredError(err)) {
+        this.logger.error(
+          `WABA ${waba._id}: token is permanently expired — marking WABA as DISCONNECTED`,
+        );
+        await this.wabaService.markTokenExpired(waba._id.toString());
       }
-
-      await this.wabaService.updateAccessToken(waba._id.toString(), newToken);
-      this.logger.log(`WABA ${waba._id}: access token updated in DB — retrying send`);
-
-      return this.metaApi.sendMessage(waba.phoneNumberId, newToken, payload);
+      throw err;
     }
   }
 

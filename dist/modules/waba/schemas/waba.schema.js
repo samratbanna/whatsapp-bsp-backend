@@ -39,6 +39,7 @@ let Waba = class Waba {
     label;
     poolLabel;
     walletBillingEnabled;
+    tokenIssuedAt;
 };
 exports.Waba = Waba;
 __decorate([
@@ -97,6 +98,10 @@ __decorate([
     (0, mongoose_1.Prop)({ default: true }),
     __metadata("design:type", Boolean)
 ], Waba.prototype, "walletBillingEnabled", void 0);
+__decorate([
+    (0, mongoose_1.Prop)(),
+    __metadata("design:type", Date)
+], Waba.prototype, "tokenIssuedAt", void 0);
 exports.Waba = Waba = __decorate([
     (0, mongoose_1.Schema)({ timestamps: true })
 ], Waba);

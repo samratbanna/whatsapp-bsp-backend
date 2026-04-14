@@ -142,24 +142,40 @@ export class FlowExecutor {
 
       case NodeType.SEND_TEXT: {
         const text = this.interpolate(node.data.text || '', session.variables);
-        await this.metaApi.sendMessage(waba.phoneNumberId, waba.accessToken, {
-          to: session.phone,
-          type: 'text',
-          text: { body: text },
-        });
+        await this.metaApi.sendMessageAutoRefresh(
+          waba.phoneNumberId,
+          waba.accessToken,
+          {
+            to: session.phone,
+            type: 'text',
+            text: { body: text },
+          },
+          async (newToken) => {
+            waba.accessToken = newToken;
+            await this.wabaService.updateAccessToken(waba._id.toString(), newToken);
+          },
+        );
         return node.next || 'end';
       }
 
       case NodeType.SEND_TEMPLATE: {
-        await this.metaApi.sendMessage(waba.phoneNumberId, waba.accessToken, {
-          to: session.phone,
-          type: 'template',
-          template: {
-            name: node.data.templateName,
-            language: { code: node.data.languageCode || 'en_US' },
-            components: node.data.components || [],
+        await this.metaApi.sendMessageAutoRefresh(
+          waba.phoneNumberId,
+          waba.accessToken,
+          {
+            to: session.phone,
+            type: 'template',
+            template: {
+              name: node.data.templateName,
+              language: { code: node.data.languageCode || 'en_US' },
+              components: node.data.components || [],
+            },
           },
-        });
+          async (newToken) => {
+            waba.accessToken = newToken;
+            await this.wabaService.updateAccessToken(waba._id.toString(), newToken);
+          },
+        );
         return node.next || 'end';
       }
 

@@ -107,7 +107,10 @@ let CampaignProcessor = CampaignProcessor_1 = class CampaignProcessor {
                             components,
                         },
                     };
-                    const result = await this.metaApi.sendMessage(waba.phoneNumberId, waba.accessToken, payload);
+                    const result = await this.metaApi.sendMessageAutoRefresh(waba.phoneNumberId, waba.accessToken, payload, async (newToken) => {
+                        waba.accessToken = newToken;
+                        await this.wabaService.updateAccessToken(waba._id.toString(), newToken);
+                    });
                     await this.messagesService['messageModel'].create({
                         organization: new mongoose_2.Types.ObjectId(orgId),
                         waba: campaign.waba,
@@ -127,6 +130,14 @@ let CampaignProcessor = CampaignProcessor_1 = class CampaignProcessor {
                     campaign.sentCount++;
                 }
                 catch (err) {
+                    if (this.metaApi.isTokenExpiredError(err)) {
+                        this.logger.error(`Campaign ${campaignId}: WABA token permanently expired — aborting campaign`);
+                        await this.wabaService.markTokenExpired(waba._id.toString());
+                        campaign.status = campaign_schema_1.CampaignStatus.FAILED;
+                        campaign.failureReason = 'Meta access token has expired. Reconnect your WABA.';
+                        await campaign.save();
+                        return;
+                    }
                     this.logger.warn(`Failed to send to ${phone}: ${this.getErrorMessage(err)}`);
                     campaign.failedCount++;
                 }
@@ -181,24 +192,70 @@ let CampaignProcessor = CampaignProcessor_1 = class CampaignProcessor {
         }));
     }
     resolveVariables(components, staticVars, contact) {
-        const resolve = (val) => val
+        const interpolate = (val) => val
             .replace(/\{\{contact\.name\}\}/g, contact?.name || '')
             .replace(/\{\{contact\.phone\}\}/g, contact?.phone || '');
-        return components.map((comp) => {
-            if (!comp.parameters)
-                return comp;
-            return {
-                ...comp,
-                parameters: comp.parameters.map((param) => {
-                    if (param.type === 'text') {
-                        const key = param.text?.replace(/\{\{(\d+)\}\}/, '$1');
-                        const val = staticVars[key] || param.text || '';
-                        return { ...param, text: resolve(val) };
+        const resolveText = (text) => {
+            const withStatic = text.replace(/\{\{(\d+)\}\}/g, (_, n) => staticVars[n] ?? `{{${n}}}`);
+            return interpolate(withStatic);
+        };
+        const result = [];
+        for (const comp of components) {
+            const typeRaw = (comp.type || '').toUpperCase();
+            if (typeRaw === 'FOOTER')
+                continue;
+            if (typeRaw === 'BUTTONS') {
+                const buttons = comp.buttons || [];
+                buttons.forEach((btn, idx) => {
+                    if (btn.type === 'QUICK_REPLY') {
+                        result.push({
+                            type: 'button',
+                            sub_type: 'quick_reply',
+                            index: idx,
+                            parameters: [{ type: 'payload', payload: btn.text || '' }],
+                        });
                     }
-                    return param;
-                }),
-            };
-        });
+                    else if (btn.type === 'URL' && btn.url && /\{\{\d+\}\}/.test(btn.url)) {
+                        const suffix = resolveText(btn.url.replace(/^.*\{\{\d+\}\}/, ''));
+                        result.push({
+                            type: 'button',
+                            sub_type: 'url',
+                            index: idx,
+                            parameters: [{ type: 'text', text: suffix }],
+                        });
+                    }
+                });
+                continue;
+            }
+            const sendType = typeRaw.toLowerCase();
+            const formatRaw = (comp.format || 'TEXT').toUpperCase();
+            if (typeRaw === 'HEADER' && formatRaw !== 'TEXT') {
+                const mediaType = formatRaw.toLowerCase();
+                const link = staticVars['header_url'] ||
+                    staticVars['1'] ||
+                    comp.example?.header_handle?.[0] ||
+                    '';
+                if (link) {
+                    result.push({
+                        type: sendType,
+                        parameters: [{ type: mediaType, [mediaType]: { link } }],
+                    });
+                }
+                continue;
+            }
+            const storedText = comp.text || '';
+            const placeholders = [...storedText.matchAll(/\{\{(\d+)\}\}/g)].map((m) => m[1]);
+            if (placeholders.length === 0)
+                continue;
+            result.push({
+                type: sendType,
+                parameters: placeholders.map((n) => ({
+                    type: 'text',
+                    text: resolveText(`{{${n}}}`),
+                })),
+            });
+        }
+        return result;
     }
     sleep(ms) {
         return new Promise((resolve) => setTimeout(resolve, ms));

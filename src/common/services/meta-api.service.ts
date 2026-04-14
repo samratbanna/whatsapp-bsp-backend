@@ -1,6 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance } from 'axios';
+import { MetaApiException } from '../exceptions/meta-api.exception';
 
 const META_API_VERSION = 'v19.0';
 const META_BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
@@ -13,14 +14,31 @@ export class MetaApiService {
 
   /** Returns true when the Meta error is an expired/invalid OAuth token (code 190). */
   isTokenExpiredError(err: any): boolean {
+    // MetaApiException carries the code directly (thrown by all service methods below).
+    if (err instanceof MetaApiException) return err.metaCode === 190;
+    // Fallback: raw axios error (e.g. from exchangeForLongLivedToken itself).
     return err?.response?.data?.error?.code === 190;
+  }
+
+  /** Converts a raw axios Meta API error into a MetaApiException. */
+  private toMetaException(err: any): MetaApiException | BadRequestException {
+    const metaErr = err?.response?.data?.error;
+    if (metaErr?.code) {
+      return new MetaApiException(
+        metaErr.code,
+        metaErr.error_subcode,
+        metaErr.message || 'Meta API error',
+      );
+    }
+    return new BadRequestException(metaErr?.message || 'Meta API error');
   }
 
   /**
    * Exchanges any valid Meta user access token for a long-lived token (~60 days).
    * Uses META_APP_ID + META_APP_SECRET from environment.
+   * Returns the new token and the server-reported expiry (in seconds from now).
    */
-  async exchangeForLongLivedToken(currentToken: string): Promise<string> {
+  async exchangeForLongLivedToken(currentToken: string): Promise<{ token: string; expiresIn: number }> {
     const appId = this.config.get<string>('META_APP_ID');
     const appSecret = this.config.get<string>('META_APP_SECRET');
     const res = await axios.get(`${META_BASE_URL}/oauth/access_token`, {
@@ -33,8 +51,9 @@ export class MetaApiService {
     });
     const newToken = res.data?.access_token;
     if (!newToken) throw new BadRequestException('Meta token exchange returned no access_token');
-    this.logger.log('Meta long-lived token refreshed successfully');
-    return newToken;
+    const expiresIn: number = res.data?.expires_in ?? 5183944; // default ~60 days
+    this.logger.log(`Meta long-lived token refreshed successfully (expires in ${Math.round(expiresIn / 86400)} days)`);
+    return { token: newToken, expiresIn };
   }
 
   private client(accessToken: string): AxiosInstance {
@@ -57,9 +76,53 @@ export class MetaApiService {
       return res.data;
     } catch (err: any) {
       this.logger.error('Meta sendMessage error', err?.response?.data);
-      throw new BadRequestException(
-        err?.response?.data?.error?.message || 'Meta API error',
+      throw this.toMetaException(err);
+    }
+  }
+
+  /**
+   * Sends a message with automatic token-refresh on expiry (Meta error code 190).
+   * @param onTokenRefreshed  Async callback invoked with the new token after a
+   *                          successful exchange so callers can persist it.
+   */
+  async sendMessageAutoRefresh(
+    phoneNumberId: string,
+    accessToken: string,
+    payload: any,
+    onTokenRefreshed?: (newToken: string) => Promise<void>,
+  ): Promise<any> {
+    try {
+      return await this.sendMessage(phoneNumberId, accessToken, payload);
+    } catch (firstErr: any) {
+      if (!this.isTokenExpiredError(firstErr)) throw firstErr;
+
+      this.logger.warn(
+        `Meta token expired for phoneNumberId ${phoneNumberId} — attempting long-lived token exchange`,
       );
+
+      let newToken: string;
+      try {
+        const refreshed = await this.exchangeForLongLivedToken(accessToken);
+        newToken = refreshed.token;
+      } catch (refreshErr: any) {
+        this.logger.error(
+          'Meta token refresh failed — token is fully expired and requires re-authentication',
+          refreshErr?.response?.data ?? refreshErr?.message,
+        );
+        // Signal to callers that the token is dead (re-throw original 190 error).
+        throw firstErr;
+      }
+
+      if (onTokenRefreshed) {
+        try {
+          await onTokenRefreshed(newToken);
+        } catch (saveErr: any) {
+          this.logger.error('Failed to persist refreshed token', saveErr?.message);
+        }
+      }
+
+      this.logger.log(`Token refreshed for ${phoneNumberId} — retrying message send`);
+      return this.sendMessage(phoneNumberId, newToken, payload);
     }
   }
 
@@ -73,9 +136,7 @@ export class MetaApiService {
       return res.data?.data || [];
     } catch (err: any) {
       this.logger.error('Meta getTemplates error', err?.response?.data);
-      throw new BadRequestException(
-        err?.response?.data?.error?.message || 'Meta API error',
-      );
+      throw this.toMetaException(err);
     }
   }
 
@@ -89,9 +150,7 @@ export class MetaApiService {
       return res.data;
     } catch (err: any) {
       this.logger.error('Meta createTemplate error', err?.response?.data);
-      throw new BadRequestException(
-        err?.response?.data?.error?.message || 'Meta API error',
-      );
+      throw this.toMetaException(err);
     }
   }
 
@@ -105,9 +164,7 @@ export class MetaApiService {
       return res.data;
     } catch (err: any) {
       this.logger.error('Meta deleteTemplate error', err?.response?.data);
-      throw new BadRequestException(
-        err?.response?.data?.error?.message || 'Meta API error',
-      );
+      throw this.toMetaException(err);
     }
   }
 
@@ -120,9 +177,7 @@ export class MetaApiService {
       return res.data;
     } catch (err: any) {
       this.logger.error('Meta getPhoneNumberInfo error', err?.response?.data);
-      throw new BadRequestException(
-        err?.response?.data?.error?.message || 'Meta API error',
-      );
+      throw this.toMetaException(err);
     }
   }
 
@@ -170,9 +225,7 @@ export class MetaApiService {
       return res.data;
     } catch (err: any) {
       this.logger.error('Meta uploadMedia error', err?.response?.data);
-      throw new BadRequestException(
-        err?.response?.data?.error?.message || 'Meta API error',
-      );
+      throw this.toMetaException(err);
     }
   }
 

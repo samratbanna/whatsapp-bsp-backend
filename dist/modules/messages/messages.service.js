@@ -36,23 +36,18 @@ let MessagesService = MessagesService_1 = class MessagesService {
     }
     async sendWithAutoRefresh(waba, payload) {
         try {
-            return await this.metaApi.sendMessage(waba.phoneNumberId, waba.accessToken, payload);
+            return await this.metaApi.sendMessageAutoRefresh(waba.phoneNumberId, waba.accessToken, payload, async (newToken) => {
+                waba.accessToken = newToken;
+                await this.wabaService.updateAccessToken(waba._id.toString(), newToken);
+                this.logger.log(`WABA ${waba._id}: access token refreshed and persisted`);
+            });
         }
         catch (err) {
-            if (!this.metaApi.isTokenExpiredError(err))
-                throw err;
-            this.logger.warn(`WABA ${waba._id}: Meta token expired — exchanging for long-lived token`);
-            let newToken;
-            try {
-                newToken = await this.metaApi.exchangeForLongLivedToken(waba.accessToken);
+            if (this.metaApi.isTokenExpiredError(err)) {
+                this.logger.error(`WABA ${waba._id}: token is permanently expired — marking WABA as DISCONNECTED`);
+                await this.wabaService.markTokenExpired(waba._id.toString());
             }
-            catch (refreshErr) {
-                this.logger.error(`WABA ${waba._id}: token refresh failed`, refreshErr?.response?.data);
-                throw err;
-            }
-            await this.wabaService.updateAccessToken(waba._id.toString(), newToken);
-            this.logger.log(`WABA ${waba._id}: access token updated in DB — retrying send`);
-            return this.metaApi.sendMessage(waba.phoneNumberId, newToken, payload);
+            throw err;
         }
     }
     async sendText(orgId, dto) {

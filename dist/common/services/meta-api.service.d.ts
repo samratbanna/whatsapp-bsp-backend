@@ -4,9 +4,14 @@ export declare class MetaApiService {
     private readonly logger;
     constructor(config: ConfigService);
     isTokenExpiredError(err: any): boolean;
-    exchangeForLongLivedToken(currentToken: string): Promise<string>;
+    private toMetaException;
+    exchangeForLongLivedToken(currentToken: string): Promise<{
+        token: string;
+        expiresIn: number;
+    }>;
     private client;
     sendMessage(phoneNumberId: string, accessToken: string, payload: any): Promise<any>;
+    sendMessageAutoRefresh(phoneNumberId: string, accessToken: string, payload: any, onTokenRefreshed?: (newToken: string) => Promise<void>): Promise<any>;
     getTemplates(wabaId: string, accessToken: string): Promise<any>;
     createTemplate(wabaId: string, accessToken: string, payload: any): Promise<any>;
     deleteTemplate(wabaId: string, accessToken: string, templateName: string): Promise<any>;

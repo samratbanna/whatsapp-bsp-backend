@@ -25,6 +25,7 @@ export declare class Waba {
     label?: string;
     poolLabel?: string;
     walletBillingEnabled: boolean;
+    tokenIssuedAt?: Date;
 }
 export declare const WabaSchema: import("mongoose").Schema<Waba, import("mongoose").Model<Waba, any, any, any, any, any, Waba>, {}, {}, {}, {}, import("mongoose").DefaultSchemaOptions, Waba, Document<unknown, {}, Waba, {
     id: string;
@@ -153,6 +154,15 @@ export declare const WabaSchema: import("mongoose").Schema<Waba, import("mongoos
         id: string;
     }> | undefined;
     walletBillingEnabled?: import("mongoose").SchemaDefinitionProperty<boolean, Waba, Document<unknown, {}, Waba, {
+        id: string;
+    }, import("mongoose").DefaultSchemaOptions> & Omit<Waba & {
+        _id: Types.ObjectId;
+    } & {
+        __v: number;
+    }, "id"> & {
+        id: string;
+    }> | undefined;
+    tokenIssuedAt?: import("mongoose").SchemaDefinitionProperty<Date | undefined, Waba, Document<unknown, {}, Waba, {
         id: string;
     }, import("mongoose").DefaultSchemaOptions> & Omit<Waba & {
         _id: Types.ObjectId;
