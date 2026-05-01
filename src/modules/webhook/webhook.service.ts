@@ -5,6 +5,7 @@ import { WabaService } from '../waba/waba.service';
 import { MetaApiService } from '../../common/services/meta-api.service';
 import { FlowExecutor } from '../flow-builder/executors/flow.executor';
 import { InboxGateway } from '../inbox/gateways/inbox.gateway';
+import { log } from 'console';
 
 @Injectable()
 export class WebhookService {
@@ -25,10 +26,13 @@ export class WebhookService {
   }
 
   async processEvent(body: any, signature: string, rawBody?: Buffer): Promise<void> {
+    console.log(`Received webhook event: ${JSON.stringify(body)}`);
     if (signature && rawBody) {
       const appSecret = this.config.get<string>('META_APP_SECRET');
       if (appSecret) {
         const valid = this.metaApi.verifySignature(rawBody.toString(), signature, appSecret);
+        console.log("valid", valid);
+        
         if (!valid) {
           this.logger.warn('Invalid webhook signature — ignoring event');
           return;
