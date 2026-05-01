@@ -73,7 +73,7 @@ export class WebhookService {
     // ── Inbound messages ───────────────────────────────────────────
     for (const message of value.messages || []) {
       try {
-        const stored = await this.messagesService.storeInbound(orgId, wabaDbId, message);
+        const stored = await this.messagesService.storeInbound(orgId, wabaDbId, message, waba.displayPhoneNumber);
         this.logger.log(`Inbound stored: ${stored._id}`);
 
         // Broadcast to live inbox via Socket.io

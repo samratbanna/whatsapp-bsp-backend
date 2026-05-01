@@ -171,7 +171,7 @@ export class MessagesService {
   }
 
   // ── Store inbound message (called by webhook) ──────────────────────
-  async storeInbound(orgId: string, wabaId: string, rawMessage: any): Promise<MessageDocument> {
+  async storeInbound(orgId: string, wabaId: string, rawMessage: any, toPhoneNumber?: string): Promise<MessageDocument> {
     const existing = await this.messageModel.findOne({
       metaMessageId: rawMessage.id,
     });
@@ -203,7 +203,7 @@ export class MessagesService {
       waba: new Types.ObjectId(wabaId),
       metaMessageId: rawMessage.id,
       from: rawMessage.from,
-      to: rawMessage.to || '',
+      to: toPhoneNumber || rawMessage.to || rawMessage.from,
       direction: MessageDirection.INBOUND,
       type,
       status: MessageStatus.DELIVERED,
