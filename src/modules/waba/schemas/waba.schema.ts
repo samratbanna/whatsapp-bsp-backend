@@ -21,7 +21,7 @@ export class Waba {
   organization: Types.ObjectId;
 
   // Ownership — set by super admin
-  @Prop({ enum: WabaOwnershipType, default: WabaOwnershipType.BYO })
+  @Prop({ enum: WabaOwnershipType, default: WabaOwnershipType.SHARED })
   ownershipType: WabaOwnershipType;
 
   // Meta credentials
