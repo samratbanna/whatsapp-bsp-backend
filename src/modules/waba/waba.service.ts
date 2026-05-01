@@ -31,7 +31,7 @@ export class WabaService {
     let resolvedToken = dto.accessToken;
     let tokenIssuedAt = new Date();
     try {
-      const refreshed = await this.metaApi.exchangeForLongLivedToken(dto.accessToken);
+      const refreshed = await this.metaApi.exchangeForLongLivedToken(dto.accessToken, dto.appId, dto.appSecret);
       resolvedToken = refreshed.token;
       tokenIssuedAt = new Date();
     } catch (e: any) {
@@ -83,7 +83,7 @@ export class WabaService {
     let resolvedToken = dto.accessToken;
     let tokenIssuedAt = new Date();
     try {
-      const refreshed = await this.metaApi.exchangeForLongLivedToken(dto.accessToken);
+      const refreshed = await this.metaApi.exchangeForLongLivedToken(dto.accessToken, dto.appId, dto.appSecret);
       resolvedToken = refreshed.token;
       tokenIssuedAt = new Date();
     } catch (e: any) {

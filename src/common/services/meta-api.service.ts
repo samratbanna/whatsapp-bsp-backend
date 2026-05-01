@@ -38,14 +38,18 @@ export class MetaApiService {
    * Uses META_APP_ID + META_APP_SECRET from environment.
    * Returns the new token and the server-reported expiry (in seconds from now).
    */
-  async exchangeForLongLivedToken(currentToken: string): Promise<{ token: string; expiresIn: number }> {
-    const appId = this.config.get<string>('META_APP_ID');
-    const appSecret = this.config.get<string>('META_APP_SECRET');
+  async exchangeForLongLivedToken(
+    currentToken: string,
+    appId?: string,
+    appSecret?: string,
+  ): Promise<{ token: string; expiresIn: number }> {
+    const resolvedAppId = appId ?? this.config.get<string>('META_APP_ID');
+    const resolvedAppSecret = appSecret ?? this.config.get<string>('META_APP_SECRET');
     const res = await axios.get(`${META_BASE_URL}/oauth/access_token`, {
       params: {
         grant_type: 'fb_exchange_token',
-        client_id: appId,
-        client_secret: appSecret,
+        client_id: resolvedAppId,
+        client_secret: resolvedAppSecret,
         fb_exchange_token: currentToken,
       },
     });

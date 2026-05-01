@@ -15,6 +15,14 @@ export class ConnectWabaDto {
   @IsString()
   accessToken: string;
 
+  @ApiProperty({ description: 'Meta App ID used to exchange the token' })
+  @IsString()
+  appId: string;
+
+  @ApiProperty({ description: 'Meta App Secret used to exchange the token' })
+  @IsString()
+  appSecret: string;
+
   @ApiPropertyOptional({ enum: WabaOwnershipType, default: WabaOwnershipType.BYO })
   @IsEnum(WabaOwnershipType)
   @IsOptional()
@@ -80,6 +88,14 @@ export class AssignSharedWabaDto {
   @ApiProperty({ description: 'BSP system user access token' })
   @IsString()
   accessToken: string;
+
+  @ApiProperty({ description: 'Meta App ID used to exchange the token' })
+  @IsString()
+  appId: string;
+
+  @ApiProperty({ description: 'Meta App Secret used to exchange the token' })
+  @IsString()
+  appSecret: string;
 
   @ApiPropertyOptional()
   @IsString()
