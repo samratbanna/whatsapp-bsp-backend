@@ -27,6 +27,8 @@ export class WebhookService {
 
   async processEvent(body: any, signature: string, rawBody?: Buffer): Promise<void> {
     console.log(`Received webhook event: ${JSON.stringify(body)}`);
+    console.log(`Signature: ${signature}`);
+    console.log(`Raw body: ${rawBody?.toString()}`);
     if (signature && rawBody) {
       const appSecret = this.config.get<string>('META_APP_SECRET');
       if (appSecret) {
