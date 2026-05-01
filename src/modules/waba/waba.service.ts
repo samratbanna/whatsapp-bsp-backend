@@ -58,6 +58,7 @@ export class WabaService {
       wabaId: dto.wabaId,
       phoneNumberId: dto.phoneNumberId,
       accessToken: resolvedToken,
+      appSecret: dto.appSecret,
       tokenIssuedAt,
       displayPhoneNumber: phoneInfo.display_phone_number,
       verifiedName: phoneInfo.verified_name,
@@ -101,6 +102,7 @@ export class WabaService {
       wabaId: dto.wabaId,
       phoneNumberId: dto.phoneNumberId,
       accessToken: resolvedToken,
+      appSecret: dto.appSecret,
       tokenIssuedAt,
       displayPhoneNumber: phoneInfo.display_phone_number,
       verifiedName: phoneInfo.verified_name,
@@ -152,7 +154,7 @@ export class WabaService {
   async findByPhoneNumberId(phoneNumberId: string): Promise<WabaDocument | null> {
     return this.wabaModel
       .findOne({ phoneNumberId })
-      .select('+accessToken')
+      .select('+accessToken +appSecret')
       .exec();
   }
 

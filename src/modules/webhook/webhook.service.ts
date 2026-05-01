@@ -29,24 +29,29 @@ export class WebhookService {
     console.log(`Received webhook event: ${JSON.stringify(body)}`);
     console.log(`Signature: ${signature}`);
     console.log(`Raw body: ${rawBody?.toString()}`);
-    if (signature && rawBody) {
-      const appSecret = this.config.get<string>('META_APP_SECRET');
-      if (appSecret) {
-        const valid = this.metaApi.verifySignature(rawBody.toString(), signature, appSecret);
-        console.log("valid", valid);
-        
-        if (!valid) {
-          this.logger.warn('Invalid webhook signature — ignoring event');
-          return;
-        }
-      }
-    }
 
     if (body.object !== 'whatsapp_business_account') return;
 
     for (const entry of body.entry || []) {
       for (const change of entry.changes || []) {
         if (change.field !== 'messages') continue;
+
+        // Verify signature using the appSecret stored on the WABA record
+        if (signature && rawBody) {
+          const phoneNumberId = change.value?.metadata?.phone_number_id;
+          if (phoneNumberId) {
+            const waba = await this.wabaService.findByPhoneNumberId(phoneNumberId);
+            if (waba?.appSecret) {
+              const valid = this.metaApi.verifySignature(rawBody.toString(), signature, waba.appSecret);
+              console.log('valid', valid);
+              if (!valid) {
+                this.logger.warn('Invalid webhook signature — ignoring event');
+                return;
+              }
+            }
+          }
+        }
+
         await this.processChange(change.value);
       }
     }

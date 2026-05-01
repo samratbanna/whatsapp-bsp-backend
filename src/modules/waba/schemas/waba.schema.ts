@@ -40,6 +40,9 @@ export class Waba {
   @Prop({ required: true, select: false })
   accessToken: string;
 
+  @Prop({ trim: true, select: false })
+  appSecret?: string;
+
   // Status & quality
   @Prop({ enum: WabaStatus, default: WabaStatus.ACTIVE })
   status: WabaStatus;
