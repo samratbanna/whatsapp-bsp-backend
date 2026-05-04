@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { MetaApiException } from '../exceptions/meta-api.exception';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -27,7 +28,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         ? exception.getResponse()
         : 'Internal server error';
 
-    const errorResponse = {
+    const baseResponse: any = {
       statusCode: status,
       timestamp: new Date().toISOString(),
       path: request.url,
@@ -37,10 +38,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
           : message,
     };
 
+    // Forward Meta-specific error fields so frontend can show user-friendly text
+    if (exception instanceof MetaApiException) {
+      baseResponse.metaCode      = exception.metaCode;
+      baseResponse.metaSubCode   = exception.metaSubCode ?? null;
+      baseResponse.errorUserTitle = exception.errorUserTitle ?? null;
+      baseResponse.errorUserMsg  = exception.errorUserMsg ?? null;
+    }
+
     if (status === HttpStatus.INTERNAL_SERVER_ERROR) {
       this.logger.error(exception);
     }
 
-    response.status(status).json(errorResponse);
+    response.status(status).json(baseResponse);
   }
 }

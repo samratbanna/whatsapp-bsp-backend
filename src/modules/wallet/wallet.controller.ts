@@ -10,7 +10,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Role } from '../../common/enums';
 import { WalletService } from './wallet.service';
 import {
-  AddCreditsDto, BulkAddCreditsDto,
+  AddCreditsDto, BulkAddCreditsDto, DeductCreditsDto,
   UpdateWalletSettingsDto, WalletTxQueryDto,
 } from './dto/wallet.dto';
 
@@ -111,5 +111,17 @@ export class WalletController {
     @CurrentUser('sub') adminId: string,
   ) {
     return this.walletService.bulkAddCredits(orgId, dto, adminId);
+  }
+
+  // Super admin: deduct credits from a specific category
+  @Post('admin/:orgId/deduct-credits')
+  @UseGuards(RolesGuard)
+  @Roles(Role.SUPER_ADMIN)
+  deductCredits(
+    @Param('orgId') orgId: string,
+    @Body() dto: DeductCreditsDto,
+    @CurrentUser('sub') adminId: string,
+  ) {
+    return this.walletService.deductCreditsAdmin(orgId, dto, adminId);
   }
 }

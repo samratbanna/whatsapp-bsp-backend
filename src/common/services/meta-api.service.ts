@@ -28,6 +28,8 @@ export class MetaApiService {
         metaErr.code,
         metaErr.error_subcode,
         metaErr.message || 'Meta API error',
+        metaErr.error_user_title,
+        metaErr.error_user_msg,
       );
     }
     return new BadRequestException(metaErr?.message || 'Meta API error');
@@ -135,7 +137,12 @@ export class MetaApiService {
     try {
       const res = await this.client(accessToken).get(
         `/${wabaId}/message_templates`,
-        { params: { limit: 100 } },
+        {
+          params: {
+            limit: 100,
+            fields: 'id,name,status,category,language,components,rejected_reason,quality_score',
+          },
+        },
       );
       return res.data?.data || [];
     } catch (err: any) {

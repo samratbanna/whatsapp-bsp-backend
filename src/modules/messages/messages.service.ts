@@ -11,6 +11,7 @@ import { MetaApiService } from '../../common/services/meta-api.service';
 import { WalletService } from '../wallet/wallet.service';
 import { WalletCategory } from '../wallet/schemas/wallet.schema';
 import { WabaStatus } from '../waba/schemas/waba.schema';
+import { Contact, ContactDocument } from '../contacts/schemas/contact.schema';
 
 @Injectable()
 export class MessagesService {
@@ -18,6 +19,7 @@ export class MessagesService {
 
   constructor(
     @InjectModel(Message.name) private messageModel: Model<MessageDocument>,
+    @InjectModel(Contact.name) private contactModel: Model<ContactDocument>,
     private wabaService: WabaService,
     private metaApi: MetaApiService,
     private walletService: WalletService,
@@ -257,6 +259,11 @@ export class MessagesService {
     );
   }
 
+  // ── Look up a message by Meta's WAMID (used by webhook for orgId resolution) ─
+  async findByMetaMessageId(metaMessageId: string): Promise<MessageDocument | null> {
+    return this.messageModel.findOne({ metaMessageId }).select('organization').exec();
+  }
+
   // ── List messages (conversation view) ─────────────────────────────
   async findAll(orgId: string, query: MessageQueryDto) {
     const filter: any = { organization: new Types.ObjectId(orgId) };
@@ -316,6 +323,37 @@ export class MessagesService {
           messageCount: { $sum: 1 },
         },
       },
+      // ── Join contacts to get name, avatar, labels ──────────────────────
+      {
+        $lookup: {
+          from: 'contacts',
+          let: { phone: '$_id', org: new Types.ObjectId(orgId) },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ['$organization', '$$org'] },
+                    { $eq: ['$phone', '$$phone'] },
+                  ],
+                },
+              },
+            },
+            { $limit: 1 },
+            { $project: { name: 1, avatar: 1, labels: 1, optedOut: 1 } },
+          ],
+          as: 'contactInfo',
+        },
+      },
+      {
+        $addFields: {
+          contactName: { $ifNull: [{ $arrayElemAt: ['$contactInfo.name', 0] }, null] },
+          contactAvatar: { $ifNull: [{ $arrayElemAt: ['$contactInfo.avatar', 0] }, null] },
+          contactLabels: { $ifNull: [{ $arrayElemAt: ['$contactInfo.labels', 0] }, []] },
+          optedOut: { $ifNull: [{ $arrayElemAt: ['$contactInfo.optedOut', 0] }, false] },
+        },
+      },
+      { $unset: 'contactInfo' },
       { $sort: { 'lastMessage.createdAt': -1 } },
       { $limit: 100 },
     ]);
@@ -336,5 +374,25 @@ export class MessagesService {
     ]);
 
     return { total, today: todayCount, inbound, outbound, failed };
+  }
+
+  // ── Mark all inbound messages from a contact as read ──────────────
+  async markConversationRead(
+    orgId: string,
+    phone: string,
+  ): Promise<{ updated: number }> {
+    // Normalize: strip leading country code 91 for 12-digit Indian numbers
+    const normalized = /^91\d{10}$/.test(phone) ? phone.slice(2) : phone;
+
+    const result = await this.messageModel.updateMany(
+      {
+        organization: new Types.ObjectId(orgId),
+        $or: [{ from: phone }, { from: normalized }],
+        direction: MessageDirection.INBOUND,
+        status: { $ne: MessageStatus.READ },
+      },
+      { $set: { status: MessageStatus.READ, readAt: new Date() } },
+    );
+    return { updated: result.modifiedCount };
   }
 }

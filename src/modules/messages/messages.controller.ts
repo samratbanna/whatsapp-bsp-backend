@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Body, Query,
+  Controller, Get, Post, Patch, Body, Query, Param,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
@@ -62,5 +62,14 @@ export class MessagesController {
   @Get('stats')
   getStats(@CurrentUser('orgId') orgId: string) {
     return this.messagesService.getStats(orgId);
+  }
+
+  // Mark all inbound messages from a contact as read
+  @Patch('read/:phone')
+  markRead(
+    @CurrentUser('orgId') orgId: string,
+    @Param('phone') phone: string,
+  ) {
+    return this.messagesService.markConversationRead(orgId, phone);
   }
 }

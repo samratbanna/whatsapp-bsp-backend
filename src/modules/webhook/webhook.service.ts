@@ -67,7 +67,12 @@ export class WebhookService {
       return;
     }
 
-    const orgId = waba.organization.toString();
+    // Use the first assigned org for inbound routing
+    const orgId = (waba as any).organizations?.[0]?.toString();
+    if (!orgId) {
+      this.logger.warn(`WABA ${(waba._id as any).toString()} has no assigned organization — skipping event`);
+      return;
+    }
     const wabaDbId = (waba._id as any).toString();
 
     // ── Inbound messages ───────────────────────────────────────────
@@ -96,12 +101,16 @@ export class WebhookService {
     // ── Status updates ─────────────────────────────────────────────
     for (const status of value.statuses || []) {
       try {
+        // Resolve the correct orgId from the stored message so wallet refunds
+        // always credit the right organization, even for shared WABAs.
+        const msg = await this.messagesService.findByMetaMessageId(status.id);
+        const statusOrgId = (msg as any)?.organization?.toString() ?? orgId;
         await this.messagesService.updateStatus(
           status.id,
           status.status,
           status.timestamp,
           status.errors?.[0],
-          orgId, // pass orgId for refund on failure
+          statusOrgId,
         );
         this.inboxGateway?.broadcastStatusUpdate(orgId, {
           metaMessageId: status.id,

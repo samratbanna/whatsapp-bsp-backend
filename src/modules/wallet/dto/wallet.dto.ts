@@ -26,6 +26,23 @@ export class AddCreditsDto {
   description?: string;
 }
 
+// Super admin deducts credits from a category
+export class DeductCreditsDto {
+  @ApiProperty({ enum: WalletCategory, example: 'transactional' })
+  @IsEnum(WalletCategory)
+  category: WalletCategory;
+
+  @ApiProperty({ example: 100, description: 'Number of message credits to deduct' })
+  @IsInt()
+  @Min(1)
+  credits: number;
+
+  @ApiPropertyOptional({ example: 'Manual correction — credits over-allocated' })
+  @IsString()
+  @IsOptional()
+  description?: string;
+}
+
 // Super admin bulk add across all categories at once
 export class BulkAddCreditsDto {
   @ApiPropertyOptional({ example: 1000 })

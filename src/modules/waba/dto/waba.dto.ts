@@ -71,39 +71,9 @@ export class UpdateWabaDto {
   walletBillingEnabled?: boolean;
 }
 
-// Super admin: assign a BSP-owned (SHARED) WABA to an org
-export class AssignSharedWabaDto {
+// Super admin: assign an existing WABA to an organization
+export class AssignOrgDto {
   @ApiProperty({ description: 'Organization ID to assign this WABA to' })
   @IsString()
   orgId: string;
-
-  @ApiProperty({ description: 'WABA ID from BSP Meta account' })
-  @IsString()
-  wabaId: string;
-
-  @ApiProperty({ description: 'Phone Number ID' })
-  @IsString()
-  phoneNumberId: string;
-
-  @ApiProperty({ description: 'BSP system user access token' })
-  @IsString()
-  accessToken: string;
-
-  @ApiProperty({ description: 'Meta App ID used to exchange the token' })
-  @IsString()
-  appId: string;
-
-  @ApiProperty({ description: 'Meta App Secret used to exchange the token' })
-  @IsString()
-  appSecret: string;
-
-  @ApiPropertyOptional()
-  @IsString()
-  @IsOptional()
-  label?: string;
-
-  @ApiPropertyOptional()
-  @IsString()
-  @IsOptional()
-  poolLabel?: string;
 }

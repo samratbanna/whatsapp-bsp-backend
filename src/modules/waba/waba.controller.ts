@@ -9,7 +9,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Role } from '../../common/enums';
 import { WabaService } from './waba.service';
-import { ConnectWabaDto, UpdateWabaDto, AssignSharedWabaDto } from './dto/waba.dto';
+import { ConnectWabaDto, UpdateWabaDto, AssignOrgDto } from './dto/waba.dto';
 
 @ApiTags('WABA')
 @ApiBearerAuth()
@@ -18,63 +18,73 @@ import { ConnectWabaDto, UpdateWabaDto, AssignSharedWabaDto } from './dto/waba.d
 export class WabaController {
   constructor(private readonly wabaService: WabaService) {}
 
-  // ── Org: connect own (BYO) WABA ────────────────────────────────────
+  // ── Super admin: register a WABA in the pool ───────────────────────
   @Post('connect')
-  @Roles(Role.ORG_ADMIN, Role.SUPER_ADMIN)
-  connect(
-    @CurrentUser('orgId') orgId: string,
-    @Body() dto: ConnectWabaDto,
-  ) {
-    return this.wabaService.connect(orgId, dto);
+  @Roles(Role.SUPER_ADMIN)
+  connect(@Body() dto: ConnectWabaDto) {
+    return this.wabaService.connect(dto);
   }
 
+  // ── SUPER_ADMIN sees all; ORG_ADMIN/AGENT see their org's WABAs ────
   @Get()
   @Roles(Role.ORG_ADMIN, Role.SUPER_ADMIN, Role.AGENT)
-  findAll(@CurrentUser('orgId') orgId: string) {
-    return this.wabaService.findAll();
+  findAll(
+    @CurrentUser('role') role: string,
+    @CurrentUser('orgId') orgId: string,
+  ) {
+    if (role === Role.SUPER_ADMIN) return this.wabaService.findAll();
+    return this.wabaService.findByOrg(orgId);
   }
 
   @Get(':id')
   @Roles(Role.ORG_ADMIN, Role.SUPER_ADMIN)
   findOne(
     @Param('id') id: string,
+    @CurrentUser('role') role: string,
     @CurrentUser('orgId') orgId: string,
   ) {
+    if (role === Role.SUPER_ADMIN) return this.wabaService.findOne(id);
     return this.wabaService.findOne(id, orgId);
   }
 
+  // ── Super admin only: update / disconnect / delete ─────────────────
   @Put(':id')
-  @Roles(Role.ORG_ADMIN, Role.SUPER_ADMIN)
+  @Roles(Role.SUPER_ADMIN)
   update(
     @Param('id') id: string,
-    @CurrentUser('orgId') orgId: string,
     @Body() dto: UpdateWabaDto,
   ) {
-    return this.wabaService.update(id, orgId, dto);
+    return this.wabaService.update(id, dto);
   }
 
   @Patch(':id/disconnect')
-  @Roles(Role.ORG_ADMIN, Role.SUPER_ADMIN)
-  disconnect(
-    @Param('id') id: string,
-    @CurrentUser('orgId') orgId: string,
-  ) {
-    return this.wabaService.disconnect(id, orgId);
+  @Roles(Role.SUPER_ADMIN)
+  disconnect(@Param('id') id: string) {
+    return this.wabaService.disconnect(id);
   }
 
   @Delete(':id')
-  @Roles(Role.ORG_ADMIN, Role.SUPER_ADMIN)
-  remove(
-    @Param('id') id: string,
-    @CurrentUser('orgId') orgId: string,
-  ) {
-    return this.wabaService.remove(id, orgId);
+  @Roles(Role.SUPER_ADMIN)
+  remove(@Param('id') id: string) {
+    return this.wabaService.remove(id);
   }
 
-  // ── Super admin: assign BSP-owned SHARED WABA to any org ──────────
-  @Post('admin/assign-shared')
+  // ── Super admin: assign / unassign a WABA to/from an org ───────────
+  @Post(':id/assign')
   @Roles(Role.SUPER_ADMIN)
-  assignShared(@Body() dto: AssignSharedWabaDto) {
-    return this.wabaService.assignShared(dto);
+  assignToOrg(
+    @Param('id') id: string,
+    @Body() dto: AssignOrgDto,
+  ) {
+    return this.wabaService.assignToOrg(id, dto.orgId);
+  }
+
+  @Delete(':id/assign/:orgId')
+  @Roles(Role.SUPER_ADMIN)
+  unassignFromOrg(
+    @Param('id') id: string,
+    @Param('orgId') orgId: string,
+  ) {
+    return this.wabaService.unassignFromOrg(id, orgId);
   }
 }

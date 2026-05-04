@@ -151,6 +151,7 @@ export class OrganizationsService {
   async remove(id: string): Promise<void> {
     const org = await this.orgModel.findById(id);
     if (!org) throw new NotFoundException('Organization not found');
+    await this.walletService.deleteForOrg(id);
     await org.deleteOne();
   }
 }

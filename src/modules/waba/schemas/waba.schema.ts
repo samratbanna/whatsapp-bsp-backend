@@ -17,8 +17,8 @@ export enum WabaOwnershipType {
 
 @Schema({ timestamps: true })
 export class Waba {
-  @Prop({ type: Types.ObjectId, ref: 'Organization', required: true })
-  organization: Types.ObjectId;
+  @Prop({ type: [Types.ObjectId], ref: 'Organization', default: [] })
+  organizations: Types.ObjectId[];
 
   // Ownership — set by super admin
   @Prop({ enum: WabaOwnershipType, default: WabaOwnershipType.SHARED })
@@ -75,6 +75,6 @@ export class Waba {
 }
 
 export const WabaSchema = SchemaFactory.createForClass(Waba);
-WabaSchema.index({ organization: 1 });
+WabaSchema.index({ organizations: 1 });
 WabaSchema.index({ phoneNumberId: 1 }, { unique: true });
 WabaSchema.index({ wabaId: 1 });

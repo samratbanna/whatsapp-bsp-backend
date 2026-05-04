@@ -44,6 +44,13 @@ export class Template {
   @Prop({ trim: true })
   rejectedReason?: string;
 
+  @Prop({ type: Object })
+  qualityScore?: {
+    score: 'GREEN' | 'YELLOW' | 'RED' | 'UNKNOWN';
+    date?: number;
+    reason?: string;
+  };
+
   // Components — header, body, footer, buttons
   @Prop({ type: [Object], default: [] })
   components: {

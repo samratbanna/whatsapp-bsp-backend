@@ -11,6 +11,7 @@ import {
 } from './schemas/wallet.schema';
 import {
   AddCreditsDto, BulkAddCreditsDto,
+  DeductCreditsDto,
   UpdateWalletSettingsDto, WalletTxQueryDto,
 } from './dto/wallet.dto';
 
@@ -144,6 +145,45 @@ export class WalletService {
 
     this.logger.log(
       `Credits added: org=${orgId} cat=${dto.category} +${dto.credits} → ${creditsAfter}`,
+    );
+    return { wallet, transaction };
+  }
+
+  // ── Deduct credits (super admin manual adjustment) ─────────────────
+  async deductCreditsAdmin(
+    orgId: string,
+    dto: DeductCreditsDto,
+    adminId: string,
+  ): Promise<{ wallet: WalletDocument; transaction: WalletTransactionDocument }> {
+    const wallet = await this.getOrCreate(orgId);
+    const creditsBefore = wallet[dto.category] as number;
+
+    if (dto.credits > creditsBefore) {
+      throw new BadRequestException(
+        `Cannot deduct ${dto.credits} from ${dto.category}. Current balance: ${creditsBefore}.`,
+      );
+    }
+
+    const creditsAfter = creditsBefore - dto.credits;
+    wallet[dto.category] = creditsAfter;
+    (wallet as any)[`total${cap(dto.category)}Used`] += dto.credits;
+    await wallet.save();
+
+    const transaction = await this.txModel.create({
+      organization:  new Types.ObjectId(orgId),
+      wallet:        wallet._id,
+      type:          TransactionType.DEBIT,
+      reason:        TransactionReason.ADJUSTMENT,
+      category:      dto.category,
+      credits:       dto.credits,
+      creditsBefore,
+      creditsAfter,
+      description:   dto.description || `Admin deducted ${dto.credits} ${dto.category} credits`,
+      performedBy:   adminId,
+    });
+
+    this.logger.log(
+      `Credits deducted by admin: org=${orgId} cat=${dto.category} -${dto.credits} → ${creditsAfter} by=${adminId}`,
     );
     return { wallet, transaction };
   }
@@ -363,6 +403,14 @@ export class WalletService {
         authentication: usage['authentication'] || 0,
       },
     };
+  }
+
+  // ── Delete wallet & transactions for org (on org deletion) ──────
+  async deleteForOrg(orgId: string): Promise<void> {
+    const orgObjectId = new Types.ObjectId(orgId);
+    await this.txModel.deleteMany({ organization: orgObjectId });
+    await this.walletModel.deleteOne({ organization: orgObjectId });
+    this.logger.log(`Wallet and transactions deleted for org=${orgId}`);
   }
 
   // ── Admin: all org wallets (sorted by lowest credits) ─────────────
