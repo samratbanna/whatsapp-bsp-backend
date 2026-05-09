@@ -3,8 +3,6 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { BullModule } from '@nestjs/bull';
 import { ScheduleModule } from '@nestjs/schedule';
-import { ServeStaticModule } from '@nestjs/serve-static';
-import * as path from 'path';
 
 // Phase 1
 import { CommonModule } from './common/common.module';
@@ -59,12 +57,6 @@ import { PricingModule } from './modules/pricing/pricing.module';
 
     // Cron scheduler
     ScheduleModule.forRoot(),
-
-    // Serve static files
-    ServeStaticModule.forRoot({
-      rootPath: path.join(__dirname, '..', 'msgconnectpro'),
-      serveRoot: '/msgconnectpro',
-    }),
 
     // Phase 1
     CommonModule,

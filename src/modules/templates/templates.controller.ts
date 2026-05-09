@@ -21,6 +21,14 @@ export class TemplatesController {
   constructor(private readonly templatesService: TemplatesService) {}
 
   @Post()
+  create(
+    @CurrentUser('orgId') orgId: string,
+    @Body() dto: CreateTemplateDto,
+  ) {
+    return this.templatesService.create(orgId, dto);
+  }
+
+  @Post('upload-media')
   @UseInterceptors(FileInterceptor('file'))
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -30,22 +38,16 @@ export class TemplatesController {
         file: {
           type: 'string',
           format: 'binary',
-          description: 'Image or document file for template',
-        },
-        dto: {
-          type: 'string',
-          description: 'Template creation data as JSON string',
+          description: 'Media file to upload (image, video, or document)',
         },
       },
     },
   })
-  create(
+  uploadMedia(
     @CurrentUser('orgId') orgId: string,
-    @Body('dto') dtoString: string,
-    @UploadedFile() file?: Express.Multer.File,
+    @UploadedFile() file: Express.Multer.File,
   ) {
-    const dto = JSON.parse(dtoString);
-    return this.templatesService.create(orgId, dto, file);
+    return this.templatesService.uploadMedia(orgId, file);
   }
 
   @Post('sync')

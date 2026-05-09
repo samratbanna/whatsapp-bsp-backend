@@ -43,7 +43,7 @@ export class TemplateComponentDto {
   @ApiPropertyOptional()
   @IsString()
   @IsOptional()
-  mediaUrl?: string;
+  mediaId?: string;
 }
 
 export class CreateTemplateDto {

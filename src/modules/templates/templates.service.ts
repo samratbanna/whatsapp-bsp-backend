@@ -1,8 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import * as fs from 'fs';
-import * as path from 'path';
 import { Template, TemplateDocument, TemplateStatus } from './schemas/template.schema';
 import { CreateTemplateDto, TemplateQueryDto } from './dto/template.dto';
 import { WabaService } from '../waba/waba.service';
@@ -32,7 +30,7 @@ export class TemplatesService {
   }
 
   // ── Create + submit to Meta ────────────────────────────────────────
-  async create(orgId: string, dto: CreateTemplateDto, file?: Express.Multer.File): Promise<TemplateDocument> {
+  async create(orgId: string, dto: CreateTemplateDto): Promise<TemplateDocument> {
     const waba = dto.wabaId
       ? await this.wabaService.findOne(dto.wabaId, orgId)
       : await this.wabaService.findDefaultForOrg(orgId);
@@ -46,25 +44,16 @@ export class TemplatesService {
     });
     if (existing) throw new BadRequestException('Template with this name already exists');
 
-    let components = dto.components;
-    if (file) {
-      const uploadDir = path.join(process.cwd(), 'msgconnectpro');
-      if (!fs.existsSync(uploadDir)) {
-        fs.mkdirSync(uploadDir, { recursive: true });
+    // Prepare components for Meta API
+    const metaComponents = dto.components.map(comp => {
+      if (comp.type === 'HEADER' && comp.format && comp.format !== 'TEXT' && comp.mediaId) {
+        return {
+          ...comp,
+          example: { header_handle: [comp.mediaId] }
+        };
       }
-      const fileName = `${Date.now()}-${file.originalname}`;
-      const filePath = path.join(uploadDir, fileName);
-      fs.writeFileSync(filePath, file.buffer);
-      const mediaUrl = `/msgconnectpro/${fileName}`;
-
-      // Set mediaUrl in header component if IMAGE or DOCUMENT
-      components = dto.components.map(comp => {
-        if (comp.type === 'HEADER' && (comp.format === 'IMAGE' || comp.format === 'DOCUMENT')) {
-          return { ...comp, mediaUrl };
-        }
-        return comp;
-      });
-    }
+      return comp;
+    });
 
     // Submit to Meta
     let metaTemplateId: string | undefined;
@@ -76,7 +65,7 @@ export class TemplatesService {
           name: dto.name,
           category: dto.category,
           language: dto.language,
-          components,
+          components: metaComponents,
         },
       );
       metaTemplateId = metaRes.id;
@@ -92,10 +81,29 @@ export class TemplatesService {
       name: dto.name,
       category: dto.category,
       language: dto.language,
-      components: components as any[],
-      variables: this.extractVariables(components),
+      components: dto.components as any[],
+      variables: this.extractVariables(dto.components),
       status: TemplateStatus.PENDING,
     });
+  }
+
+  // ── Upload media to Meta ───────────────────────────────────────────
+  async uploadMedia(orgId: string, file: Express.Multer.File) {
+    const waba = await this.wabaService.findDefaultForOrg(orgId);
+    if (!waba) throw new BadRequestException('No active WABA found');
+
+    try {
+      const result = await this.metaApi.uploadMedia(
+        waba.phoneNumberId,
+        waba.accessToken,
+        file.buffer,
+        file.mimetype,
+      );
+      return { mediaId: result.id };
+    } catch (err) {
+      this.logger.error('Media upload failed', err.message);
+      throw err;
+    }
   }
 
   // ── Sync all templates from Meta ───────────────────────────────────
