@@ -39,6 +39,11 @@ export class TemplateComponentDto {
   @IsObject()
   @IsOptional()
   example?: any;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  mediaUrl?: string;
 }
 
 export class CreateTemplateDto {

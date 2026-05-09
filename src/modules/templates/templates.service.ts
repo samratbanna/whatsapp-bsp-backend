@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import * as fs from 'fs';
+import * as path from 'path';
 import { Template, TemplateDocument, TemplateStatus } from './schemas/template.schema';
 import { CreateTemplateDto, TemplateQueryDto } from './dto/template.dto';
 import { WabaService } from '../waba/waba.service';
@@ -30,7 +32,7 @@ export class TemplatesService {
   }
 
   // ── Create + submit to Meta ────────────────────────────────────────
-  async create(orgId: string, dto: CreateTemplateDto): Promise<TemplateDocument> {
+  async create(orgId: string, dto: CreateTemplateDto, file?: Express.Multer.File): Promise<TemplateDocument> {
     const waba = dto.wabaId
       ? await this.wabaService.findOne(dto.wabaId, orgId)
       : await this.wabaService.findDefaultForOrg(orgId);
@@ -44,6 +46,26 @@ export class TemplatesService {
     });
     if (existing) throw new BadRequestException('Template with this name already exists');
 
+    let components = dto.components;
+    if (file) {
+      const uploadDir = path.join(process.cwd(), 'msgconnectpro');
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      const fileName = `${Date.now()}-${file.originalname}`;
+      const filePath = path.join(uploadDir, fileName);
+      fs.writeFileSync(filePath, file.buffer);
+      const mediaUrl = `/msgconnectpro/${fileName}`;
+
+      // Set mediaUrl in header component if IMAGE or DOCUMENT
+      components = dto.components.map(comp => {
+        if (comp.type === 'HEADER' && (comp.format === 'IMAGE' || comp.format === 'DOCUMENT')) {
+          return { ...comp, mediaUrl };
+        }
+        return comp;
+      });
+    }
+
     // Submit to Meta
     let metaTemplateId: string | undefined;
     try {
@@ -54,7 +76,7 @@ export class TemplatesService {
           name: dto.name,
           category: dto.category,
           language: dto.language,
-          components: dto.components,
+          components,
         },
       );
       metaTemplateId = metaRes.id;
@@ -70,8 +92,8 @@ export class TemplatesService {
       name: dto.name,
       category: dto.category,
       language: dto.language,
-      components: dto.components as any[],
-      variables: this.extractVariables(dto.components),
+      components: components as any[],
+      variables: this.extractVariables(components),
       status: TemplateStatus.PENDING,
     });
   }

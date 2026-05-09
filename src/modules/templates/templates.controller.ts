@@ -1,8 +1,9 @@
 import {
   Controller, Get, Post, Delete,
-  Body, Param, Query, UseGuards,
+  Body, Param, Query, UseGuards, UseInterceptors, UploadedFile,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiTags, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -20,11 +21,31 @@ export class TemplatesController {
   constructor(private readonly templatesService: TemplatesService) {}
 
   @Post()
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: 'Image or document file for template',
+        },
+        dto: {
+          type: 'string',
+          description: 'Template creation data as JSON string',
+        },
+      },
+    },
+  })
   create(
     @CurrentUser('orgId') orgId: string,
-    @Body() dto: CreateTemplateDto,
+    @Body('dto') dtoString: string,
+    @UploadedFile() file?: Express.Multer.File,
   ) {
-    return this.templatesService.create(orgId, dto);
+    const dto = JSON.parse(dtoString);
+    return this.templatesService.create(orgId, dto, file);
   }
 
   @Post('sync')
