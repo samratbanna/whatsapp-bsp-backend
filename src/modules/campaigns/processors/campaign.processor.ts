@@ -316,14 +316,19 @@ export class CampaignProcessor {
       if (typeRaw === 'HEADER' && formatRaw !== 'TEXT') {
         // Media header — parameters is a single media object
         const mediaType = formatRaw.toLowerCase() as 'image' | 'video' | 'document';
+        // comp.example?.header_handle is a resumable-upload handle, not a public URL — never use as link
         const link =
           staticVars['header_url'] ||
           staticVars['1'] ||
           comp.mediaId ||
-          comp.example?.header_handle?.[0] ||
           '';
         if (link) {
           const isMediaId = /^\d+$/.test(link);
+          if (!isMediaId) {
+            this.logger.warn(
+              `Template header media uses a URL link — ensure "${link}" is publicly accessible, or upload via the media upload API to avoid 403 errors`,
+            );
+          }
           result.push({
             type: sendType,
             parameters: [{ type: mediaType, [mediaType]: isMediaId ? { id: link } : { link } }],
