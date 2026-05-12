@@ -112,6 +112,8 @@ export class TemplatesService {
           components: metaComponents,
         },
       );
+      console.log("metaRes", metaRes);
+
       metaTemplateId = metaRes.id;
     } catch (err) {
       this.logger.error('Meta template creation failed', err.message);
@@ -160,6 +162,8 @@ export class TemplatesService {
         file.buffer,
         file.mimetype,
       );
+      console.log("result", result);
+
       return { mediaId: result.id };
     } catch (err) {
       this.logger.error('Media upload failed', err.message);
