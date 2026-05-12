@@ -97,6 +97,7 @@ export class TemplatesService {
       }
       return comp;
     });
+    console.log("mediaComponents", JSON.stringify(metaComponents));
 
     // Submit to Meta
     let metaTemplateId: string | undefined;
