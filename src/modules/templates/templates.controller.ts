@@ -1,6 +1,15 @@
 import {
-  Controller, Get, Post, Delete,
-  Body, Param, Query, UseGuards, UseInterceptors, UploadedFile,
+  Controller,
+  Get,
+  Post,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags, ApiConsumes, ApiBody } from '@nestjs/swagger';
@@ -12,6 +21,16 @@ import { Role } from '../../common/enums';
 import { TemplatesService } from './templates.service';
 import { CreateTemplateDto, TemplateQueryDto } from './dto/template.dto';
 
+const MAX_TEMPLATE_MEDIA_UPLOAD_BYTES = 100 * 1024 * 1024;
+const TEMPLATE_MEDIA_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'video/mp4',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]);
+
 @ApiTags('Templates')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -21,16 +40,28 @@ export class TemplatesController {
   constructor(private readonly templatesService: TemplatesService) {}
 
   @Post()
-  create(
-    @CurrentUser('orgId') orgId: string,
-    @Body() dto: CreateTemplateDto,
-  ) {
+  create(@CurrentUser('orgId') orgId: string, @Body() dto: CreateTemplateDto) {
     return this.templatesService.create(orgId, dto);
   }
 
   @Post('upload-media')
   @UseInterceptors(
-    FileInterceptor('file'),
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_TEMPLATE_MEDIA_UPLOAD_BYTES },
+      fileFilter: (_req, file, cb) => {
+        if (!TEMPLATE_MEDIA_MIME_TYPES.has(file.mimetype)) {
+          cb(
+            new BadRequestException(
+              'Unsupported media type. Upload JPG, PNG, MP4, PDF, DOC, or DOCX files.',
+            ),
+            false,
+          );
+          return;
+        }
+
+        cb(null, true);
+      },
+    }),
   )
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -53,10 +84,7 @@ export class TemplatesController {
   }
 
   @Post('sync')
-  sync(
-    @CurrentUser('orgId') orgId: string,
-    @Query('wabaId') wabaId?: string,
-  ) {
+  sync(@CurrentUser('orgId') orgId: string, @Query('wabaId') wabaId?: string) {
     return this.templatesService.syncFromMeta(orgId, wabaId);
   }
 
@@ -69,18 +97,12 @@ export class TemplatesController {
   }
 
   @Get(':id')
-  findOne(
-    @Param('id') id: string,
-    @CurrentUser('orgId') orgId: string,
-  ) {
+  findOne(@Param('id') id: string, @CurrentUser('orgId') orgId: string) {
     return this.templatesService.findOne(id, orgId);
   }
 
   @Delete(':id')
-  remove(
-    @Param('id') id: string,
-    @CurrentUser('orgId') orgId: string,
-  ) {
+  remove(@Param('id') id: string, @CurrentUser('orgId') orgId: string) {
     return this.templatesService.remove(id, orgId);
   }
 }

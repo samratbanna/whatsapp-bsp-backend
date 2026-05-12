@@ -1,10 +1,43 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Template, TemplateDocument, TemplateStatus } from './schemas/template.schema';
+import {
+  Template,
+  TemplateDocument,
+  TemplateStatus,
+} from './schemas/template.schema';
 import { CreateTemplateDto, TemplateQueryDto } from './dto/template.dto';
 import { WabaService } from '../waba/waba.service';
 import { MetaApiService } from '../../common/services/meta-api.service';
+
+const TEMPLATE_MEDIA_LIMITS = [
+  {
+    label: 'Images',
+    matches: (mimeType: string) =>
+      ['image/jpeg', 'image/png'].includes(mimeType),
+    maxBytes: 5 * 1024 * 1024,
+  },
+  {
+    label: 'Videos',
+    matches: (mimeType: string) => mimeType === 'video/mp4',
+    maxBytes: 16 * 1024 * 1024,
+  },
+  {
+    label: 'Documents',
+    matches: (mimeType: string) =>
+      [
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      ].includes(mimeType),
+    maxBytes: 100 * 1024 * 1024,
+  },
+];
 
 @Injectable()
 export class TemplatesService {
@@ -30,7 +63,10 @@ export class TemplatesService {
   }
 
   // ── Create + submit to Meta ────────────────────────────────────────
-  async create(orgId: string, dto: CreateTemplateDto): Promise<TemplateDocument> {
+  async create(
+    orgId: string,
+    dto: CreateTemplateDto,
+  ): Promise<TemplateDocument> {
     const waba = dto.wabaId
       ? await this.wabaService.findOne(dto.wabaId, orgId)
       : await this.wabaService.findDefaultForOrg(orgId);
@@ -42,14 +78,20 @@ export class TemplatesService {
       waba: waba._id,
       name: dto.name,
     });
-    if (existing) throw new BadRequestException('Template with this name already exists');
+    if (existing)
+      throw new BadRequestException('Template with this name already exists');
 
     // Prepare components for Meta API
-    const metaComponents = dto.components.map(comp => {
-      if (comp.type === 'HEADER' && comp.format && comp.format !== 'TEXT' && comp.mediaId) {
+    const metaComponents = dto.components.map((comp) => {
+      if (
+        comp.type === 'HEADER' &&
+        comp.format &&
+        comp.format !== 'TEXT' &&
+        comp.mediaId
+      ) {
         return {
           ...comp,
-          example: { header_handle: [comp.mediaId] }
+          example: { header_handle: [comp.mediaId] },
         };
       }
       return comp;
@@ -89,6 +131,23 @@ export class TemplatesService {
 
   // ── Upload media to Meta ───────────────────────────────────────────
   async uploadMedia(orgId: string, file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('Media file is required');
+
+    const mediaLimit = TEMPLATE_MEDIA_LIMITS.find((limit) =>
+      limit.matches(file.mimetype),
+    );
+    if (!mediaLimit) {
+      throw new BadRequestException(
+        'Unsupported media type. Upload JPG, PNG, MP4, PDF, DOC, or DOCX files.',
+      );
+    }
+
+    if (file.size > mediaLimit.maxBytes) {
+      throw new BadRequestException(
+        `${mediaLimit.label} must be ${Math.floor(mediaLimit.maxBytes / (1024 * 1024))}MB or smaller.`,
+      );
+    }
+
     const waba = await this.wabaService.findDefaultForOrg(orgId);
     if (!waba) throw new BadRequestException('No active WABA found');
 
@@ -107,7 +166,10 @@ export class TemplatesService {
   }
 
   // ── Sync all templates from Meta ───────────────────────────────────
-  async syncFromMeta(orgId: string, wabaId?: string): Promise<{ synced: number }> {
+  async syncFromMeta(
+    orgId: string,
+    wabaId?: string,
+  ): Promise<{ synced: number }> {
     const waba = wabaId
       ? await this.wabaService.findOne(wabaId, orgId)
       : await this.wabaService.findDefaultForOrg(orgId);
@@ -149,7 +211,10 @@ export class TemplatesService {
   }
 
   // ── Find all ───────────────────────────────────────────────────────
-  async findAll(orgId: string, query: TemplateQueryDto): Promise<TemplateDocument[]> {
+  async findAll(
+    orgId: string,
+    query: TemplateQueryDto,
+  ): Promise<TemplateDocument[]> {
     const filter: any = { organization: new Types.ObjectId(orgId) };
     if (query.wabaId) filter.waba = new Types.ObjectId(query.wabaId);
     if (query.status) filter.status = query.status.toUpperCase();
@@ -182,9 +247,15 @@ export class TemplatesService {
     );
 
     try {
-      await this.metaApi.deleteTemplate(waba.wabaId, waba.accessToken, template.name);
+      await this.metaApi.deleteTemplate(
+        waba.wabaId,
+        waba.accessToken,
+        template.name,
+      );
     } catch (err) {
-      this.logger.warn(`Meta delete template failed: ${err.message} — removing locally anyway`);
+      this.logger.warn(
+        `Meta delete template failed: ${err.message} — removing locally anyway`,
+      );
     }
 
     await template.deleteOne();
