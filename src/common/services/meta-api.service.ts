@@ -248,8 +248,6 @@ export class MetaApiService {
     mimeType: string,
   ) {
     try {
-      console.log("appId", appId)
-
       // 1. Initialize upload session
       const sessionRes = await axios.post(
         `${META_BASE_URL}/${appId}/uploads`,
