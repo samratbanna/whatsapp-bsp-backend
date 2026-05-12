@@ -10,7 +10,7 @@ const META_BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
 export class MetaApiService {
   private readonly logger = new Logger(MetaApiService.name);
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(private readonly config: ConfigService) { }
 
   /** Returns true when the Meta error is an expired/invalid OAuth token (code 190). */
   isTokenExpiredError(err: any): boolean {
@@ -236,6 +236,50 @@ export class MetaApiService {
       return res.data;
     } catch (err: any) {
       this.logger.error('Meta uploadMedia error', err?.response?.data);
+      throw this.toMetaException(err);
+    }
+  }
+
+  // ── Upload template media (Resumable Upload API) ───────────────────
+  async uploadTemplateMedia(
+    appId: string,
+    accessToken: string,
+    buffer: Buffer,
+    mimeType: string,
+  ) {
+    try {
+
+      // 1. Create upload session
+      const sessionRes = await axios.post(
+        `${META_BASE_URL}/${appId}/uploads`,
+        null,
+        {
+          params: {
+            file_length: buffer.length,
+            file_type: mimeType,
+            access_token: accessToken,
+          },
+        },
+      );
+      const sessionId = sessionRes.data?.id;
+      if (!sessionId) throw new Error('Failed to create upload session');
+
+      // 2. Upload file data
+      const uploadRes = await axios.post(
+        `${META_BASE_URL}/${sessionId}`,
+        buffer,
+        {
+          headers: {
+            Authorization: `OAuth ${accessToken}`,
+            file_offset: 0,
+            'Content-Type': 'application/octet-stream',
+          },
+        },
+      );
+
+      return uploadRes.data; // { h: "handle_string" }
+    } catch (err: any) {
+      this.logger.error('Meta uploadTemplateMedia error', err?.response?.data || err.message);
       throw this.toMetaException(err);
     }
   }
