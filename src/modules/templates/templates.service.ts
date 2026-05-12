@@ -153,13 +153,13 @@ export class TemplatesService {
     if (!waba) throw new BadRequestException('No active WABA found');
 
     try {
-      const result = await this.metaApi.uploadTemplateMedia(
-        waba.appId!,
+      const result = await this.metaApi.uploadMedia(
+        waba.phoneNumberId,
         waba.accessToken,
         file.buffer,
         file.mimetype,
       );
-      return { mediaId: result.h };
+      return { mediaId: result.id };
     } catch (err) {
       this.logger.error('Media upload failed', err.message);
       throw err;
