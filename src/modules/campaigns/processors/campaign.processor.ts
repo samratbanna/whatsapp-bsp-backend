@@ -315,13 +315,6 @@ export class CampaignProcessor {
 
       if (typeRaw === 'HEADER' && formatRaw !== 'TEXT') {
         // Media header — parameters is a single media object
-        const VALID_MEDIA_FORMATS = ['IMAGE', 'VIDEO', 'DOCUMENT'];
-        if (!VALID_MEDIA_FORMATS.includes(formatRaw)) {
-          this.logger.warn(
-            `Skipping HEADER component with unrecognised format "${comp.format}" — expected IMAGE, VIDEO, or DOCUMENT`,
-          );
-          continue;
-        }
         const mediaType = formatRaw.toLowerCase() as 'image' | 'video' | 'document';
         // comp.example?.header_handle is a resumable-upload handle, not a public URL — never use as link
         const link =
