@@ -5,6 +5,7 @@ import {
   HttpException,
   HttpStatus,
   Logger,
+  PayloadTooLargeException,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { MetaApiException } from '../exceptions/meta-api.exception';
@@ -17,6 +18,17 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
+
+    const isMulterFileTooLarge =
+      typeof exception === 'object' &&
+      exception !== null &&
+      (exception as { code?: string }).code === 'LIMIT_FILE_SIZE';
+
+    if (isMulterFileTooLarge) {
+      exception = new PayloadTooLargeException(
+        'File too large. Maximum upload size is 100MB.',
+      );
+    }
 
     const status =
       exception instanceof HttpException
