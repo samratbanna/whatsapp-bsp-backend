@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { BullModule } from '@nestjs/bull';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule } from '@nestjs/throttler';
 
 // Phase 1
 import { CommonModule } from './common/common.module';
@@ -23,6 +24,7 @@ import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { InboxModule } from './modules/inbox/inbox.module';
 import { FlowBuilderModule } from './modules/flow-builder/flow-builder.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
+import { PublicApiModule } from './modules/public-api/public-api.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { PricingModule } from './modules/pricing/pricing.module';
@@ -58,6 +60,12 @@ import { PricingModule } from './modules/pricing/pricing.module';
     // Cron scheduler
     ScheduleModule.forRoot(),
 
+    // Rate Limiting
+    ThrottlerModule.forRoot([{
+      ttl: 60000,
+      limit: 100,
+    }]),
+
     // Phase 1
     CommonModule,
     AuthModule,
@@ -77,6 +85,7 @@ import { PricingModule } from './modules/pricing/pricing.module';
     InboxModule,
     FlowBuilderModule,
     ApiKeysModule,
+    PublicApiModule,
     AnalyticsModule,
     WalletModule,
     PricingModule,

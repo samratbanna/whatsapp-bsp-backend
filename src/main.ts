@@ -51,10 +51,19 @@ async function bootstrap() {
       .addTag('Contacts')
       .addTag('Campaigns')
       .addTag('Flow Builder')
-      .addTag('API Keys')
+      .addTag('API Keys (Admin)')
       .addTag('Analytics')
       .addTag('Wallet')
       .addTag('Pricing')
+      .addTag('Public API')
+      .addApiKey(
+        {
+          type: 'apiKey',
+          name: 'X-API-Key',
+          in: 'header',
+        },
+        'X-API-Key',
+      )
       .build();
 
     const document = SwaggerModule.createDocument(app, swaggerConfig);
