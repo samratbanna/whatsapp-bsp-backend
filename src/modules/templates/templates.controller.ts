@@ -29,7 +29,13 @@ export class TemplatesController {
   }
 
   @Post('upload-media')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: 100 * 1024 * 1024,
+      },
+    }),
+  )
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
