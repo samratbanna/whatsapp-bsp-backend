@@ -112,8 +112,6 @@ export class TemplatesService {
           components: metaComponents,
         },
       );
-      console.log("metaRes", metaRes);
-
       metaTemplateId = metaRes.id;
     } catch (err) {
       this.logger.error('Meta template creation failed', err.message);
@@ -156,13 +154,12 @@ export class TemplatesService {
     if (!waba) throw new BadRequestException('No active WABA found');
 
     try {
-      const result = await this.metaApi.uploadMedia(
-        waba.phoneNumberId,
+      const result = await this.metaApi.uploadTemplateMedia(
+        waba.appId!,
         waba.accessToken,
         file.buffer,
         file.mimetype,
       );
-      console.log("result", result);
 
       return { mediaId: result.id };
     } catch (err) {

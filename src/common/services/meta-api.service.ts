@@ -240,6 +240,55 @@ export class MetaApiService {
     }
   }
 
+  // ── Upload media for Template (Resumable Upload API) ────────────────
+  async uploadTemplateMedia(
+    appId: string,
+    accessToken: string,
+    buffer: Buffer,
+    mimeType: string,
+  ) {
+    try {
+      console.log("appId", appId)
+
+      // 1. Initialize upload session
+      const sessionRes = await axios.post(
+        `${META_BASE_URL}/${appId}/uploads`,
+        null,
+        {
+          params: {
+            file_length: buffer.length,
+            file_type: mimeType,
+          },
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        }
+      );
+
+      const uploadSessionId = sessionRes.data.id;
+
+      // 2. Upload file data
+      const uploadRes = await axios.post(
+        `${META_BASE_URL}/${uploadSessionId}`,
+        buffer,
+        {
+          headers: {
+            Authorization: `OAuth ${accessToken}`,
+            file_offset: 0,
+          },
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity,
+        }
+      );
+
+      // uploadRes.data.h is the handle
+      return { id: uploadRes.data.h };
+    } catch (err: any) {
+      this.logger.error('Meta uploadTemplateMedia error', err?.response?.data || err.message);
+      throw this.toMetaException(err);
+    }
+  }
+
   // ── Verify webhook signature ───────────────────────────────────────
   verifySignature(payload: string, signature: string, appSecret: string): boolean {
     const crypto = require('crypto');
