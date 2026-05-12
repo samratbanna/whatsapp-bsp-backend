@@ -67,17 +67,15 @@ export class CampaignProcessor {
       const template = campaign.template as any;
       const walletCat = WalletService.toWalletCategory(template.category || 'UTILITY');
 
-      // Pre-flight: check credits available
-      if (waba.walletBillingEnabled) {
-        const credits = await this.walletService.getCredits(orgId);
-        const available = (credits as any)[walletCat] as number;
-        if (available < 1) {
-          campaign.status = CampaignStatus.FAILED;
-          campaign.failureReason = `No ${walletCat} credits (${available}). Please top up.`;
-          await campaign.save();
-          this.logger.warn(`Campaign ${campaignId} aborted — no ${walletCat} credits`);
-          return;
-        }
+      // Pre-flight: campaign sends are always billed from the org wallet.
+      const credits = await this.walletService.getCredits(orgId);
+      const available = (credits as any)[walletCat] as number;
+      if (available < 1) {
+        campaign.status = CampaignStatus.FAILED;
+        campaign.failureReason = `No ${walletCat} credits (${available}). Please top up.`;
+        await campaign.save();
+        this.logger.warn(`Campaign ${campaignId} aborted — no ${walletCat} credits`);
+        return;
       }
 
       this.logger.log(`Campaign ${campaignId}: ${phones.length} contacts, cat=${walletCat}`);
@@ -93,21 +91,19 @@ export class CampaignProcessor {
         const { phone, contact } = phones[i];
 
         try {
-          // Deduct 1 credit per message
-          if (waba.walletBillingEnabled) {
-            try {
-              await this.walletService.deductCredit(
-                orgId, walletCat,
-                undefined, (campaign._id as any).toString(),
-              );
-            } catch (walletErr: any) {
-              const message = this.getErrorMessage(walletErr);
-              this.logger.warn(`Campaign ${campaignId} stopped at ${i} - ${message}`);
-              campaign.status = CampaignStatus.PAUSED;
-              campaign.failureReason = message;
-              await campaign.save();
-              break;
-            }
+          // Deduct 1 credit per campaign message.
+          try {
+            await this.walletService.deductCredit(
+              orgId, walletCat,
+              undefined, (campaign._id as any).toString(),
+            );
+          } catch (walletErr: any) {
+            const message = this.getErrorMessage(walletErr);
+            this.logger.warn(`Campaign ${campaignId} stopped at ${i} - ${message}`);
+            campaign.status = CampaignStatus.PAUSED;
+            campaign.failureReason = message;
+            await campaign.save();
+            break;
           }
 
           // Resolve dynamic variables
@@ -225,6 +221,19 @@ export class CampaignProcessor {
       const contacts = await this.contactModel
         .find({
           groups: { $in: campaign.groups },
+          organization: new Types.ObjectId(orgId),
+          optedOut: false,
+        })
+        .select('phone name customFields')
+        .exec();
+
+      contacts.forEach((c) => phoneMap.set(c.phone, c));
+    }
+
+    // No explicit audience means send to every active contact in the org.
+    if (!campaign.contacts?.length && !campaign.groups?.length) {
+      const contacts = await this.contactModel
+        .find({
           organization: new Types.ObjectId(orgId),
           optedOut: false,
         })

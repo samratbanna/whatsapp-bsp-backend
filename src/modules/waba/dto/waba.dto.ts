@@ -23,7 +23,7 @@ export class ConnectWabaDto {
   @IsString()
   appSecret: string;
 
-  @ApiPropertyOptional({ enum: WabaOwnershipType, default: WabaOwnershipType.BYO })
+  @ApiPropertyOptional({ enum: WabaOwnershipType, default: WabaOwnershipType.SHARED })
   @IsEnum(WabaOwnershipType)
   @IsOptional()
   ownershipType?: WabaOwnershipType;
@@ -43,7 +43,7 @@ export class ConnectWabaDto {
   @IsOptional()
   isDefault?: boolean;
 
-  @ApiPropertyOptional({ default: true, description: 'Deduct wallet for messages (auto-true for SHARED, false for BYO)' })
+  @ApiPropertyOptional({ default: true, description: 'Deduct wallet for messages' })
   @IsBoolean()
   @IsOptional()
   walletBillingEnabled?: boolean;

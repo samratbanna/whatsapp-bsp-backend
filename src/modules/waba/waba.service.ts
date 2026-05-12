@@ -40,15 +40,16 @@ export class WabaService {
       // user token — store it as-is and let it fail at send time if invalid.
     }
 
-    // BYO: wallet billing disabled by default (Meta bills them directly)
-    // SHARED: wallet billing enabled (we bill them)
+    const ownershipType = dto.ownershipType || WabaOwnershipType.SHARED;
+
+    // SHARED: wallet billing enabled by default. BYO can still explicitly disable it.
     const walletBillingEnabled = dto.walletBillingEnabled !== undefined
       ? dto.walletBillingEnabled
-      : dto.ownershipType === WabaOwnershipType.SHARED;
+      : ownershipType === WabaOwnershipType.SHARED;
 
     const waba = new this.wabaModel({
       organizations: [],
-      ownershipType: dto.ownershipType || WabaOwnershipType.BYO,
+      ownershipType,
       wabaId: dto.wabaId,
       phoneNumberId: dto.phoneNumberId,
       accessToken: resolvedToken,

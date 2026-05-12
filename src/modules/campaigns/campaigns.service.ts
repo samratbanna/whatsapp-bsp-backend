@@ -27,10 +27,6 @@ export class CampaignsService {
 
     if (!waba) throw new BadRequestException('No active WABA found');
 
-    if (!dto.contacts?.length && !dto.groups?.length) {
-      throw new BadRequestException('Provide at least one contact or group');
-    }
-
     const campaign = await this.campaignModel.create({
       organization: new Types.ObjectId(orgId),
       waba: waba._id,
