@@ -82,21 +82,31 @@ export class TemplatesService {
       throw new BadRequestException('Template with this name already exists');
 
     // Prepare components for Meta API
-    const metaComponents = dto.components.map((comp) => {
+    const metaComponents = [];
+    for (const comp of dto.components) {
+      const cloned = { ...comp };
       if (
-        comp.type === 'HEADER' &&
-        comp.format &&
-        comp.format !== 'TEXT' &&
-        comp.mediaId
+        cloned.type === 'HEADER' &&
+        cloned.format &&
+        cloned.format !== 'TEXT' &&
+        cloned.mediaId
       ) {
-        const { mediaId, ...rest } = comp as any;
-        return {
+        let handle = (cloned as any).mediaId;
+        let standardId = (cloned as any).mediaId;
+        if (typeof (cloned as any).mediaId === 'string' && (cloned as any).mediaId.includes('|||')) {
+          [handle, standardId] = (cloned as any).mediaId.split('|||');
+          (comp as any).mediaId = standardId; // update the original dto to store the standard ID in DB
+        }
+
+        const { mediaId, ...rest } = cloned as any;
+        metaComponents.push({
           ...rest,
-          example: { header_handle: [mediaId] },
-        };
+          example: { header_handle: [handle] },
+        });
+      } else {
+        metaComponents.push(cloned);
       }
-      return comp;
-    });
+    }
     console.log("mediaComponents", JSON.stringify(metaComponents));
 
     // Submit to Meta
@@ -155,14 +165,22 @@ export class TemplatesService {
     if (!waba) throw new BadRequestException('No active WABA found');
 
     try {
-      const result = await this.metaApi.uploadTemplateMedia(
-        waba.appId!,
-        waba.accessToken,
-        file.buffer,
-        file.mimetype,
-      );
+      const [handleResult, standardResult] = await Promise.all([
+        this.metaApi.uploadTemplateMedia(
+          waba.appId!,
+          waba.accessToken,
+          file.buffer,
+          file.mimetype,
+        ),
+        this.metaApi.uploadMedia(
+          waba.phoneNumberId,
+          waba.accessToken,
+          file.buffer,
+          file.mimetype,
+        ),
+      ]);
 
-      return { mediaId: result.id };
+      return { mediaId: `${handleResult.id}|||${standardResult.id}` };
     } catch (err) {
       this.logger.error('Media upload failed', err.message);
       throw err;
@@ -185,8 +203,30 @@ export class TemplatesService {
       waba.accessToken,
     );
 
+    // Fetch existing templates to preserve custom fields like mediaId
+    const existingTemplates = await this.templateModel.find({
+      organization: new Types.ObjectId(orgId),
+      waba: waba._id,
+    }).lean();
+    const existingMap = new Map(existingTemplates.map(t => [t.name, t]));
+
     let synced = 0;
     for (const mt of metaTemplates) {
+      const existing = existingMap.get(mt.name);
+      const components = mt.components || [];
+
+      // Preserve mediaId
+      if (existing && existing.components) {
+        for (const comp of components) {
+          if (comp.type === 'HEADER') {
+            const extComp = existing.components.find((c: any) => c.type === 'HEADER');
+            if (extComp && (extComp as any).mediaId) {
+              (comp as any).mediaId = (extComp as any).mediaId;
+            }
+          }
+        }
+      }
+
       await this.templateModel.findOneAndUpdate(
         {
           organization: new Types.ObjectId(orgId),
@@ -199,8 +239,8 @@ export class TemplatesService {
             category: mt.category,
             language: mt.language,
             status: mt.status,
-            components: mt.components || [],
-            variables: this.extractVariables(mt.components || []),
+            components: components,
+            variables: this.extractVariables(components),
             rejectedReason: mt.rejected_reason ?? null,
             qualityScore: mt.quality_score ?? null,
             lastSyncedAt: new Date(),

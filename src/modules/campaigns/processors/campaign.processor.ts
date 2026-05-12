@@ -319,12 +319,14 @@ export class CampaignProcessor {
         const link =
           staticVars['header_url'] ||
           staticVars['1'] ||
+          comp.mediaId ||
           comp.example?.header_handle?.[0] ||
           '';
         if (link) {
+          const isMediaId = /^\d+$/.test(link);
           result.push({
             type: sendType,
-            parameters: [{ type: mediaType, [mediaType]: { link } }],
+            parameters: [{ type: mediaType, [mediaType]: isMediaId ? { id: link } : { link } }],
           });
         }
         continue;
