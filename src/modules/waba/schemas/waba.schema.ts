@@ -43,6 +43,9 @@ export class Waba {
   @Prop({ trim: true, select: false })
   appSecret?: string;
 
+  @Prop({ trim: true, select: false })
+  appId?: string;
+
   // Status & quality
   @Prop({ enum: WabaStatus, default: WabaStatus.ACTIVE })
   status: WabaStatus;

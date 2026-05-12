@@ -19,7 +19,7 @@ export class WabaService {
     @InjectModel(Waba.name) private wabaModel: Model<WabaDocument>,
     @InjectModel(Organization.name) private orgModel: Model<OrganizationDocument>,
     private metaApi: MetaApiService,
-  ) {}
+  ) { }
 
   // Super admin: register a WABA in the pool (no org assigned yet)
   async connect(dto: ConnectWabaDto): Promise<WabaDocument> {
@@ -53,6 +53,7 @@ export class WabaService {
       wabaId: dto.wabaId,
       phoneNumberId: dto.phoneNumberId,
       accessToken: resolvedToken,
+      appId: dto?.appId,
       appSecret: dto.appSecret,
       tokenIssuedAt,
       displayPhoneNumber: phoneInfo.display_phone_number,

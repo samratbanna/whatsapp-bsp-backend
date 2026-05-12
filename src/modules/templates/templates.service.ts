@@ -154,7 +154,7 @@ export class TemplatesService {
 
     try {
       const result = await this.metaApi.uploadTemplateMedia(
-        waba.wabaId,
+        waba.appId!,
         waba.accessToken,
         file.buffer,
         file.mimetype,
