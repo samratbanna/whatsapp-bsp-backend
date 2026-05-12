@@ -151,6 +151,7 @@ export class TemplatesService {
     }
 
     const waba = await this.wabaService.findDefaultForOrg(orgId);
+    console.log("waba", waba)
     if (!waba) throw new BadRequestException('No active WABA found');
 
     try {
