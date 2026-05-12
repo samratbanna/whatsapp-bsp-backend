@@ -82,7 +82,7 @@ export class TemplatesService {
       throw new BadRequestException('Template with this name already exists');
 
     // Prepare components for Meta API
-    const metaComponents = [];
+    const metaComponents: any[] = [];
     for (const comp of dto.components) {
       const cloned = { ...comp };
       if (
