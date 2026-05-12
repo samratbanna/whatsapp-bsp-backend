@@ -47,7 +47,7 @@ export class TemplatesService {
     @InjectModel(Template.name) private templateModel: Model<TemplateDocument>,
     private wabaService: WabaService,
     private metaApi: MetaApiService,
-  ) {}
+  ) { }
 
   private extractVariables(components: any[]): string[] {
     const vars: Set<string> = new Set();
@@ -89,9 +89,10 @@ export class TemplatesService {
         comp.format !== 'TEXT' &&
         comp.mediaId
       ) {
+        const { mediaId, ...rest } = comp as any;
         return {
-          ...comp,
-          example: { header_handle: [comp.mediaId] },
+          ...rest,
+          example: { header_handle: [mediaId] },
         };
       }
       return comp;
