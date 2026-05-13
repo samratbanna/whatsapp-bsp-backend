@@ -67,6 +67,10 @@ export class CampaignProcessor {
       const template = campaign.template as any;
       const walletCat = WalletService.toWalletCategory(template.category || 'UTILITY');
 
+      // If the template has a media header with only a CDN URL (no stored Meta media ID),
+      // download and re-upload it once now so all contacts use a stable numeric ID.
+      await this.ensureMediaIdForTemplate(template, waba);
+
       // Pre-flight: campaign sends are always billed from the org wallet.
       const credits = await this.walletService.getCredits(orgId);
       const available = (credits as any)[walletCat] as number;
@@ -360,6 +364,41 @@ export class CampaignProcessor {
     }
 
     return result;
+  }
+
+  // If the template has a media HEADER with no stored mediaId (only a CDN example URL),
+  // download the file from our side and re-upload to Meta to get a stable numeric ID.
+  private async ensureMediaIdForTemplate(template: any, waba: any): Promise<void> {
+    const headerComp = (template.components || []).find(
+      (c: any) => c.type === 'HEADER' && c.format && c.format !== 'TEXT',
+    );
+    if (!headerComp) return;
+    if (headerComp.mediaId) return; // already have a Meta media ID
+
+    const cdnUrl: string =
+      headerComp.example?.header_handle?.[0] || '';
+    if (!cdnUrl) return;
+
+    this.logger.log(`Uploading template media to Meta (no mediaId stored): ${cdnUrl.substring(0, 80)}...`);
+
+    try {
+      const axios = (await import('axios')).default;
+      const response = await axios.get(cdnUrl, { responseType: 'arraybuffer', timeout: 30000 });
+      const buffer = Buffer.from(response.data);
+      const mimeType: string = response.headers['content-type'] || 'application/octet-stream';
+
+      const uploadResult = await this.metaApi.uploadMedia(
+        waba.phoneNumberId,
+        waba.accessToken,
+        buffer,
+        mimeType,
+      );
+
+      headerComp.mediaId = uploadResult.id;
+      this.logger.log(`Template media uploaded, mediaId=${uploadResult.id}`);
+    } catch (err: any) {
+      this.logger.warn(`Could not pre-upload template media: ${this.getErrorMessage(err)}`);
+    }
   }
 
   private sleep(ms: number): Promise<void> {
