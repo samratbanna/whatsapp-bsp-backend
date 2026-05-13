@@ -319,11 +319,14 @@ export class CampaignProcessor {
       if (typeRaw === 'HEADER' && formatRaw !== 'TEXT') {
         // Media header — parameters is a single media object
         const mediaType = formatRaw.toLowerCase() as 'image' | 'video' | 'document';
+        // Prefer the already-uploaded Meta media ID stored on the template.
+        // Only fall back to a URL if no mediaId exists — passing a private URL
+        // to Meta causes a 403 when Meta tries to download it (error 131053).
         const link =
-          staticVars['header_url'] ||
-          staticVars['1'] ||
           comp.mediaId ||
           comp.example?.header_handle?.[0] ||
+          staticVars['header_url'] ||
+          staticVars['1'] ||
           '';
         if (!link) {
           throw new Error(
