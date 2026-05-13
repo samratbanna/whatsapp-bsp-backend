@@ -323,6 +323,45 @@ export class WalletService {
     this.logger.log(`Credit refunded: org=${orgId} cat=${category} msgId=${metaMessageId}`);
   }
 
+  // ── Bulk refund for campaign failed messages ───────────────────────
+  async bulkRefundCampaign(
+    orgId: string,
+    category: WalletCategory,
+    failedCount: number,
+    campaignId: string,
+    campaignName: string,
+  ): Promise<void> {
+    if (failedCount <= 0) return;
+
+    const wallet = await this.getOrCreate(orgId);
+    const creditsBefore = wallet[category] as number;
+    const creditsAfter = creditsBefore + failedCount;
+
+    wallet[category] = creditsAfter;
+    (wallet as any)[`total${cap(category)}Used`] = Math.max(
+      0,
+      (wallet as any)[`total${cap(category)}Used`] - failedCount,
+    );
+    await wallet.save();
+
+    await this.txModel.create({
+      organization: new Types.ObjectId(orgId),
+      wallet: wallet._id,
+      type: TransactionType.REFUND,
+      reason: TransactionReason.REFUND,
+      category,
+      credits: failedCount,
+      creditsBefore,
+      creditsAfter,
+      campaign: new Types.ObjectId(campaignId),
+      description: `Campaign "${campaignName}" — ${failedCount} failed message${failedCount > 1 ? 's' : ''} refunded`,
+    });
+
+    this.logger.log(
+      `Bulk refund: org=${orgId} cat=${category} +${failedCount} credits (campaign=${campaignId})`,
+    );
+  }
+
   // ── Update wallet settings ─────────────────────────────────────────
   async updateSettings(
     orgId: string,

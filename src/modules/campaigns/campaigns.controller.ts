@@ -1,7 +1,8 @@
 import {
   Controller, Get, Post, Put, Delete, Patch,
-  Body, Param, Query, UseGuards,
+  Body, Param, Query, UseGuards, Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -61,6 +62,21 @@ export class CampaignsController {
   @Patch(':id/cancel')
   cancel(@Param('id') id: string, @CurrentUser('orgId') orgId: string) {
     return this.campaignsService.cancel(id, orgId);
+  }
+
+  @Get(':id/report')
+  async downloadReport(
+    @Param('id') id: string,
+    @CurrentUser('orgId') orgId: string,
+    @Res() res: Response,
+  ) {
+    const buffer = await this.campaignsService.generateReport(id, orgId);
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="campaign-report-${id}.xlsx"`,
+      'Content-Length': buffer.length,
+    });
+    res.end(buffer);
   }
 
   @Delete(':id')

@@ -156,6 +156,57 @@ export class CampaignsService {
     await campaign.deleteOne();
   }
 
+  async generateReport(id: string, orgId: string): Promise<Buffer> {
+    const campaign = await this.campaignModel
+      .findOne({ _id: id, organization: new Types.ObjectId(orgId) })
+      .populate('template', 'name')
+      .exec();
+    if (!campaign) throw new NotFoundException('Campaign not found');
+
+    const ExcelJS = await import('exceljs');
+    const workbook = new ExcelJS.Workbook();
+
+    // ── Summary sheet ──────────────────────────────────────────────────
+    const summary = workbook.addWorksheet('Summary');
+    summary.columns = [
+      { header: 'Field', key: 'field', width: 25 },
+      { header: 'Value', key: 'value', width: 40 },
+    ];
+    summary.getRow(1).font = { bold: true };
+
+    const templateName = (campaign.template as any)?.name ?? '';
+    const rows = [
+      ['Campaign Name', campaign.name],
+      ['Status', campaign.status],
+      ['Template', templateName],
+      ['Total Contacts', campaign.totalCount],
+      ['Sent', campaign.sentCount],
+      ['Failed', campaign.failedCount],
+      ['Delivered', campaign.deliveredCount],
+      ['Read', campaign.readCount],
+      ['Started At', campaign.startedAt?.toISOString() ?? '—'],
+      ['Completed At', campaign.completedAt?.toISOString() ?? '—'],
+      ['Failure Reason', campaign.failureReason ?? '—'],
+    ];
+    rows.forEach(([field, value]) => summary.addRow({ field, value }));
+
+    // ── Failed contacts sheet ──────────────────────────────────────────
+    const failedSheet = workbook.addWorksheet('Failed Contacts');
+    failedSheet.columns = [
+      { header: '#', key: 'index', width: 6 },
+      { header: 'Phone', key: 'phone', width: 20 },
+      { header: 'Failure Reason', key: 'reason', width: 70 },
+    ];
+    failedSheet.getRow(1).font = { bold: true };
+
+    (campaign.failedContacts || []).forEach((fc, i) => {
+      failedSheet.addRow({ index: i + 1, phone: fc.phone, reason: fc.reason });
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    return Buffer.from(buffer);
+  }
+
   async getStats(orgId: string) {
     const orgFilter = { organization: new Types.ObjectId(orgId) };
     const results = await this.campaignModel.aggregate([

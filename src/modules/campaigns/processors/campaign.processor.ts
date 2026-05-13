@@ -172,8 +172,10 @@ export class CampaignProcessor {
             await campaign.save();
             return;
           }
-          this.logger.warn(`Failed to send to ${phone}: ${this.getErrorMessage(err)}`);
+          const failReason = this.getErrorMessage(err);
+          this.logger.warn(`Failed to send to ${phone}: ${failReason}`);
           campaign.failedCount++;
+          campaign.failedContacts.push({ phone, reason: failReason });
         }
 
         // Update progress every 10 messages
@@ -191,6 +193,17 @@ export class CampaignProcessor {
       campaign.status = CampaignStatus.COMPLETED;
       campaign.completedAt = new Date();
       await campaign.save();
+
+      // Bulk refund for all failed messages in one transaction
+      if (campaign.failedCount > 0) {
+        await this.walletService.bulkRefundCampaign(
+          orgId,
+          walletCat,
+          campaign.failedCount,
+          (campaign._id as any).toString(),
+          campaign.name,
+        );
+      }
 
       this.logger.log(
         `Campaign ${campaignId} completed: ${campaign.sentCount} sent, ${campaign.failedCount} failed`,

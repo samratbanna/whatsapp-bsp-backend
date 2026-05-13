@@ -74,6 +74,14 @@ export class Campaign {
   @Prop({ default: 0 })
   failedCount: number;
 
+  // Per-contact failure details for report generation
+  @Prop({
+    type: [{ phone: String, reason: String }],
+    default: [],
+    _id: false,
+  })
+  failedContacts: { phone: string; reason: string }[];
+
   // Throttle — messages per second (Meta rate limit safe)
   @Prop({ default: 10 })
   messagesPerSecond: number;
