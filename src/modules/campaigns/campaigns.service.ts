@@ -164,7 +164,8 @@ export class CampaignsService {
     if (!campaign) throw new NotFoundException('Campaign not found');
 
     const ExcelJS = await import('exceljs');
-    const workbook = new ExcelJS.Workbook();
+    const WorkbookClass = (ExcelJS as any).default?.Workbook ?? (ExcelJS as any).Workbook;
+    const workbook = new WorkbookClass();
 
     // ── Summary sheet ──────────────────────────────────────────────────
     const summary = workbook.addWorksheet('Summary');
