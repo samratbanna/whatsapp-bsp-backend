@@ -325,13 +325,17 @@ export class CampaignProcessor {
           comp.mediaId ||
           comp.example?.header_handle?.[0] ||
           '';
-        if (link) {
-          const isMediaId = /^\d+$/.test(link);
-          result.push({
-            type: sendType,
-            parameters: [{ type: mediaType, [mediaType]: isMediaId ? { id: link } : { link } }],
-          });
+        if (!link) {
+          throw new Error(
+            `Campaign template requires a ${formatRaw} header but no media URL or ID was provided. ` +
+            `Set templateVariables.header_url for this campaign.`,
+          );
         }
+        const isMediaId = /^\d+$/.test(link);
+        result.push({
+          type: sendType,
+          parameters: [{ type: mediaType, [mediaType]: isMediaId ? { id: link } : { link } }],
+        });
         continue;
       }
 
