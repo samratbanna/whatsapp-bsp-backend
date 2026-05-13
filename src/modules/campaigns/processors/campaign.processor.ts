@@ -113,6 +113,9 @@ export class CampaignProcessor {
             contact,
           );
 
+          console.log('components', components);
+          
+
           const payload = {
             to: phone,
             type: 'template',
