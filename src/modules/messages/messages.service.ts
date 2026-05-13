@@ -239,10 +239,12 @@ export class MessagesService {
         updateData.status = MessageStatus.READ;
         updateData.readAt = ts;
         break;
-      case 'failed':
+      case 'failed': {
         updateData.status = MessageStatus.FAILED;
         updateData.failedAt = ts;
-        updateData.failureReason = errorData?.title || 'Unknown error';
+        const title = errorData?.title || 'Unknown error';
+        const details = errorData?.error_data?.details;
+        updateData.failureReason = details ? `${title} — ${details}` : title;
 
         // Refund 1 credit on Meta failure
         if (orgId) {
@@ -251,6 +253,7 @@ export class MessagesService {
             .catch((err) => this.logger.warn(`Refund failed: ${err.message}`));
         }
         break;
+      }
     }
 
     await this.messageModel.findOneAndUpdate(

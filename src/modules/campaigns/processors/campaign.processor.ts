@@ -117,6 +117,7 @@ export class CampaignProcessor {
             template.components || [],
             campaign.templateVariables || {},
             contact,
+            template.name,
           );
 
           this.logger.debug(`Resolved components: ${JSON.stringify(components)}`);
@@ -286,6 +287,7 @@ export class CampaignProcessor {
     components: any[],
     staticVars: Record<string, string>,
     contact: any,
+    templateName?: string,
   ): any[] {
     const interpolate = (val: string): string =>
       val
@@ -354,9 +356,24 @@ export class CampaignProcessor {
           );
         }
         const isMediaId = /^\d+$/.test(link);
+        const mediaObj: Record<string, string> = isMediaId ? { id: link } : { link };
+
+        // Set a readable filename for documents so the recipient doesn't see "untitled"
+        if (mediaType === 'document') {
+          const templateFilename = templateName
+            ? `${templateName.replace(/_/g, ' ')}.pdf`
+            : 'paathshala docs.pdf';
+          const filename =
+            staticVars['header_filename'] ||
+            comp.filename ||
+            comp.example?.filename ||
+            templateFilename;
+          mediaObj['filename'] = filename;
+        }
+
         result.push({
           type: sendType,
-          parameters: [{ type: mediaType, [mediaType]: isMediaId ? { id: link } : { link } }],
+          parameters: [{ type: mediaType, [mediaType]: mediaObj }],
         });
         continue;
       }
