@@ -107,13 +107,15 @@ export class CampaignProcessor {
           }
 
           // Resolve dynamic variables
+          this.logger.debug(`Template raw components: ${JSON.stringify(template.components)}`);
+          this.logger.debug(`Campaign templateVariables: ${JSON.stringify(campaign.templateVariables)}`);
           const components = this.resolveVariables(
             template.components || [],
             campaign.templateVariables || {},
             contact,
           );
 
-          console.log('components', components);
+          this.logger.debug(`Resolved components: ${JSON.stringify(components)}`);
           
 
           const payload = {
