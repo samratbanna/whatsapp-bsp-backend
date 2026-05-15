@@ -21,6 +21,7 @@ import { ContactsModule } from './modules/contacts/contacts.module';
 
 // Phase 3
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
+import { ContactImportsModule } from './modules/contact-imports/contact-imports.module';
 import { InboxModule } from './modules/inbox/inbox.module';
 import { FlowBuilderModule } from './modules/flow-builder/flow-builder.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
@@ -82,6 +83,7 @@ import { PricingModule } from './modules/pricing/pricing.module';
 
     // Phase 3
     CampaignsModule,
+    ContactImportsModule,
     InboxModule,
     FlowBuilderModule,
     ApiKeysModule,
