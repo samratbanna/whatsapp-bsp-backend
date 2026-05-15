@@ -36,7 +36,7 @@ const ALLOWED_MIMETYPES = new Set([
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.ORG_ADMIN, Role.SUPER_ADMIN)
-@Controller('contacts/imports')
+@Controller('contact-imports')
 export class ContactImportsController {
   constructor(private readonly importsService: ContactImportsService) {}
 

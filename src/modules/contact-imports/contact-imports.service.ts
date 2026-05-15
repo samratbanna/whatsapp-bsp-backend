@@ -133,7 +133,8 @@ export class ContactImportsService {
     if (!doc) throw new NotFoundException('Import not found');
 
     const ExcelJS = await import('exceljs');
-    const workbook = new ExcelJS.Workbook();
+    const WorkbookClass = (ExcelJS as any).default?.Workbook ?? (ExcelJS as any).Workbook;
+    const workbook = new WorkbookClass();
     const sheet = workbook.addWorksheet('Failed Records');
 
     sheet.columns = [
@@ -162,7 +163,8 @@ export class ContactImportsService {
     preFailedRecords: FailedRecord[];
   }> {
     const ExcelJS = await import('exceljs');
-    const workbook = new ExcelJS.Workbook();
+    const WorkbookClass = (ExcelJS as any).default?.Workbook ?? (ExcelJS as any).Workbook;
+    const workbook = new WorkbookClass();
     await workbook.xlsx.load(buffer as any);
 
     const worksheet = workbook.worksheets[0];
