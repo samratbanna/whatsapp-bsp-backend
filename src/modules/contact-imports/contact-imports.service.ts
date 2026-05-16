@@ -158,6 +158,22 @@ export class ContactImportsService {
     return Buffer.from(buffer);
   }
 
+  private getCellText(value: any): string {
+    if (value == null) return '';
+    if (typeof value === 'number') return String(value);
+    if (typeof value === 'boolean') return String(value);
+    if (typeof value === 'string') return value.trim();
+    // Formula cell: { formula, result }
+    if (typeof value === 'object' && 'result' in value) return this.getCellText(value.result);
+    // Rich text cell: { richText: [{ text }] }
+    if (typeof value === 'object' && 'richText' in value) {
+      return (value.richText as any[]).map((rt) => rt.text ?? '').join('').trim();
+    }
+    // Hyperlink cell: { text, hyperlink }
+    if (typeof value === 'object' && 'text' in value) return this.getCellText(value.text);
+    return String(value).trim();
+  }
+
   private async parseExcel(buffer: Buffer): Promise<{
     valid: ParsedContact[];
     preFailedRecords: FailedRecord[];
@@ -176,7 +192,7 @@ export class ContactImportsService {
     const headerRow = worksheet.getRow(1);
     const headers: string[] = [];
     headerRow.eachCell({ includeEmpty: false }, (cell) => {
-      headers.push(String(cell.value ?? '').toLowerCase().trim());
+      headers.push(this.getCellText(cell.value).toLowerCase());
     });
 
     if (!headers.includes('phone')) {
@@ -193,7 +209,7 @@ export class ContactImportsService {
 
       const values: string[] = [];
       row.eachCell({ includeEmpty: true }, (cell) => {
-        values.push(cell.value != null ? String(cell.value).trim() : '');
+        values.push(this.getCellText(cell.value));
       });
 
       // Skip entirely empty rows

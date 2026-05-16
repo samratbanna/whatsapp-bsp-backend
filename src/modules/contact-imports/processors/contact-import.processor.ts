@@ -66,7 +66,7 @@ export class ContactImportProcessor {
               $set: {
                 ...(row.name && { name: row.name }),
                 ...(row.email && { email: row.email }),
-                ...(Object.keys(row.customFields).length > 0 && {
+                ...(Object.keys(row.customFields ?? {}).length > 0 && {
                   customFields: row.customFields,
                 }),
               },
