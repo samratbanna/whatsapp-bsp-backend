@@ -22,7 +22,44 @@ import { ContactImportQueryDto } from './dto/contact-import.dto';
 import { CONTACT_IMPORT_QUEUE } from './processors/contact-import.processor';
 
 const MAX_ROWS = 10_000;
-const PHONE_REGEX = /^\d{7,15}$/;
+
+/**
+ * Normalizes any Indian phone number format to 91XXXXXXXXXX (12 digits).
+ *
+ * Handled input formats (all produce the same output):
+ *   9988888888        → 10 digits, no country code
+ *   09988888888       → 0-prefixed 10 digits
+ *   919988888888      → 12 digits with country code
+ *   0919988888888     → 0-prefixed 12 digits
+ *   +919988888888     → international prefix
+ *   +91 99888 88888   → spaces/dashes/brackets ignored
+ *
+ * Returns null if the number cannot be normalized to a valid Indian mobile.
+ */
+function normalizeIndianPhone(raw: string): string | null {
+  const digits = raw.replace(/\D/g, '');
+
+  let mobile: string;
+
+  if (digits.length === 10) {
+    mobile = digits;
+  } else if (digits.length === 11 && digits.startsWith('0')) {
+    mobile = digits.slice(1);
+  } else if (digits.length === 12 && digits.startsWith('91')) {
+    mobile = digits.slice(2);
+  } else if (digits.length === 13 && digits.startsWith('091')) {
+    mobile = digits.slice(3);
+  } else {
+    return null;
+  }
+
+  // Indian mobile numbers start with 6, 7, 8, or 9
+  if (!/^[6-9]\d{9}$/.test(mobile)) {
+    return null;
+  }
+
+  return '91' + mobile;
+}
 
 @Injectable()
 export class ContactImportsService {
@@ -220,16 +257,17 @@ export class ContactImportsService {
         rowData[header] = values[idx] ?? '';
       });
 
-      const phone = (rowData['phone'] ?? '').replace(/\D/g, '');
+      const rawPhone = rowData['phone'] ?? '';
+      const phone = normalizeIndianPhone(rawPhone);
       const name = rowData['name'] ?? '';
       const email = rowData['email'] ?? '';
 
-      if (!PHONE_REGEX.test(phone)) {
+      if (!phone) {
         preFailedRecords.push({
           rowNumber,
-          phone: rowData['phone'] ?? '',
+          phone: rawPhone,
           name: name || undefined,
-          reason: 'Missing or invalid phone number',
+          reason: `Invalid Indian mobile number: "${rawPhone}"`,
         });
         return;
       }
