@@ -81,6 +81,44 @@ export class CampaignsService {
     return campaign.save();
   }
 
+  async resume(id: string, orgId: string): Promise<CampaignDocument> {
+    const campaign = await this.findOne(id, orgId);
+
+    const resumable = [CampaignStatus.PAUSED, CampaignStatus.FAILED, CampaignStatus.COMPLETED];
+    if (!resumable.includes(campaign.status)) {
+      throw new BadRequestException('Only paused, failed, or incomplete campaigns can be resumed');
+    }
+
+    // For truly completed campaigns (all messages sent), block resume
+    if (
+      campaign.status === CampaignStatus.COMPLETED &&
+      campaign.totalCount > 0 &&
+      campaign.sentCount + campaign.failedCount >= campaign.totalCount
+    ) {
+      throw new BadRequestException('Campaign has already sent all messages');
+    }
+
+    // For old records without resumeFromIndex tracking, infer from counts
+    if (!campaign.resumeFromIndex && campaign.sentCount + campaign.failedCount > 0) {
+      campaign.resumeFromIndex = campaign.sentCount + campaign.failedCount;
+    }
+
+    const job = await this.campaignQueue.add(
+      'broadcast',
+      { campaignId: id, orgId },
+      {
+        attempts: 1,
+        removeOnComplete: false,
+        removeOnFail: false,
+      },
+    );
+
+    campaign.status = CampaignStatus.RUNNING;
+    campaign.jobId = job.id as string;
+    campaign.failureReason = undefined;
+    return campaign.save();
+  }
+
   async pause(id: string, orgId: string): Promise<CampaignDocument> {
     const campaign = await this.findOne(id, orgId);
     if (campaign.status !== CampaignStatus.RUNNING) {

@@ -86,6 +86,10 @@ export class Campaign {
   @Prop({ default: 10 })
   messagesPerSecond: number;
 
+  // Index into the contacts list where the campaign should resume from (0 = start fresh)
+  @Prop({ default: 0 })
+  resumeFromIndex: number;
+
   // BullMQ job ID for tracking/cancellation
   @Prop({ trim: true })
   jobId?: string;

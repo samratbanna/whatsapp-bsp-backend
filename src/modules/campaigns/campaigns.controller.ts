@@ -54,6 +54,11 @@ export class CampaignsController {
     return this.campaignsService.launch(id, orgId);
   }
 
+  @Patch(':id/resume')
+  resume(@Param('id') id: string, @CurrentUser('orgId') orgId: string) {
+    return this.campaignsService.resume(id, orgId);
+  }
+
   @Patch(':id/pause')
   pause(@Param('id') id: string, @CurrentUser('orgId') orgId: string) {
     return this.campaignsService.pause(id, orgId);

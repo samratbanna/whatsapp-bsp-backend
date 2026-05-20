@@ -47,9 +47,9 @@ export class CampaignProcessor {
       return;
     }
 
-    // Mark as running
+    // Mark as running (preserve startedAt on resume)
     campaign.status = CampaignStatus.RUNNING;
-    campaign.startedAt = new Date();
+    if (!campaign.startedAt) campaign.startedAt = new Date();
     await campaign.save();
 
     try {
@@ -63,6 +63,7 @@ export class CampaignProcessor {
       campaign.totalCount = phones.length;
       await campaign.save();
 
+      const startIndex = campaign.resumeFromIndex || 0;
       const delayMs = Math.floor(1000 / (campaign.messagesPerSecond || 10));
       const template = campaign.template as any;
       const walletCat = WalletService.toWalletCategory(template.category || 'UTILITY');
@@ -82,13 +83,18 @@ export class CampaignProcessor {
         return;
       }
 
-      this.logger.log(`Campaign ${campaignId}: ${phones.length} contacts, cat=${walletCat}`);
+      this.logger.log(`Campaign ${campaignId}: ${phones.length} contacts, starting at ${startIndex}, cat=${walletCat}`);
 
-      for (let i = 0; i < phones.length; i++) {
+      let didStop = false;
+
+      for (let i = startIndex; i < phones.length; i++) {
         // Check if campaign was cancelled/paused
         const fresh = await this.campaignModel.findById(campaignId).select('status').exec();
         if (fresh?.status === CampaignStatus.CANCELLED || fresh?.status === CampaignStatus.PAUSED) {
+          campaign.resumeFromIndex = i;
           this.logger.log(`Campaign ${campaignId} stopped at ${i}/${phones.length}`);
+          await campaign.save();
+          didStop = true;
           break;
         }
 
@@ -104,9 +110,11 @@ export class CampaignProcessor {
           } catch (walletErr: any) {
             const message = this.getErrorMessage(walletErr);
             this.logger.warn(`Campaign ${campaignId} stopped at ${i} - ${message}`);
+            campaign.resumeFromIndex = i;
             campaign.status = CampaignStatus.PAUSED;
             campaign.failureReason = message;
             await campaign.save();
+            didStop = true;
             break;
           }
 
@@ -168,6 +176,7 @@ export class CampaignProcessor {
               `Campaign ${campaignId}: WABA token permanently expired — aborting campaign`,
             );
             await this.wabaService.markTokenExpired(waba._id.toString());
+            campaign.resumeFromIndex = i;
             campaign.status = CampaignStatus.FAILED;
             campaign.failureReason = 'Meta access token has expired. Reconnect your WABA.';
             await campaign.save();
@@ -191,24 +200,27 @@ export class CampaignProcessor {
         }
       }
 
-      campaign.status = CampaignStatus.COMPLETED;
-      campaign.completedAt = new Date();
-      await campaign.save();
+      if (!didStop) {
+        campaign.status = CampaignStatus.COMPLETED;
+        campaign.completedAt = new Date();
+        campaign.resumeFromIndex = 0;
+        await campaign.save();
 
-      // Bulk refund for all failed messages in one transaction
-      if (campaign.failedCount > 0) {
-        await this.walletService.bulkRefundCampaign(
-          orgId,
-          walletCat,
-          campaign.failedCount,
-          (campaign._id as any).toString(),
-          campaign.name,
+        // Bulk refund for all failed messages in one transaction
+        if (campaign.failedCount > 0) {
+          await this.walletService.bulkRefundCampaign(
+            orgId,
+            walletCat,
+            campaign.failedCount,
+            (campaign._id as any).toString(),
+            campaign.name,
+          );
+        }
+
+        this.logger.log(
+          `Campaign ${campaignId} completed: ${campaign.sentCount} sent, ${campaign.failedCount} failed`,
         );
       }
-
-      this.logger.log(
-        `Campaign ${campaignId} completed: ${campaign.sentCount} sent, ${campaign.failedCount} failed`,
-      );
     } catch (err: any) {
       const message = this.getErrorMessage(err);
       this.logger.error(`Campaign ${campaignId} failed: ${message}`);
@@ -234,6 +246,7 @@ export class CampaignProcessor {
           optedOut: false,
         })
         .select('phone name customFields')
+        .sort({ _id: 1 })
         .exec();
 
       contacts.forEach((c) => phoneMap.set(c.phone, c));
@@ -248,6 +261,7 @@ export class CampaignProcessor {
           optedOut: false,
         })
         .select('phone name customFields')
+        .sort({ _id: 1 })
         .exec();
 
       contacts.forEach((c) => phoneMap.set(c.phone, c));
@@ -261,6 +275,7 @@ export class CampaignProcessor {
           optedOut: false,
         })
         .select('phone name customFields')
+        .sort({ _id: 1 })
         .exec();
 
       contacts.forEach((c) => phoneMap.set(c.phone, c));
