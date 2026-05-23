@@ -144,6 +144,8 @@ export class MetaApiService {
           },
         },
       );
+      console.log(JSON.stringify(res,res?.data, res?.data?.data));
+      
       return res.data?.data || [];
     } catch (err: any) {
       this.logger.error('Meta getTemplates error', err?.response?.data);
@@ -153,6 +155,9 @@ export class MetaApiService {
 
   // ── Create template ────────────────────────────────────────────────
   async createTemplate(wabaId: string, accessToken: string, payload: any) {
+    console.log('Creating template with payload', payload);
+    console.log('accessToken', accessToken);
+    console.log('wabaId', wabaId);
     try {
       const res = await this.client(accessToken).post(
         `/${wabaId}/message_templates`,
