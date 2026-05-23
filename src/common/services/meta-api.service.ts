@@ -144,7 +144,8 @@ export class MetaApiService {
           },
         },
       );
-      console.log(JSON.stringify(res,res?.data, res?.data?.data));
+      console.log(JSON.stringify(res));
+      console.log(JSON.stringify(res.data?.data));
       
       return res.data?.data || [];
     } catch (err: any) {
