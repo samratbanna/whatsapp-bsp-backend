@@ -148,7 +148,8 @@ export class MetaApiService {
       
       return res.data?.data || [];
     } catch (err: any) {
-      this.logger.error('Meta getTemplates error', err?.response?.data);
+      this.logger.error('Meta getTemplates error', err);
+      this.logger.error('Meta getTemplates error', err?.response);
       throw this.toMetaException(err);
     }
   }
