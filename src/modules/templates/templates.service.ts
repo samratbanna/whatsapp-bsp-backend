@@ -81,33 +81,49 @@ export class TemplatesService {
     if (existing)
       throw new BadRequestException('Template with this name already exists');
 
-    // Prepare components for Meta API
+    // Build clean per-type components for the Meta API (no undefined fields)
     const metaComponents: any[] = [];
     for (const comp of dto.components) {
-      const cloned = { ...comp };
-      if (
-        cloned.type === 'HEADER' &&
-        cloned.format &&
-        cloned.format !== 'TEXT' &&
-        cloned.mediaId
-      ) {
-        let handle = (cloned as any).mediaId;
-        let standardId = (cloned as any).mediaId;
-        if (typeof (cloned as any).mediaId === 'string' && (cloned as any).mediaId.includes('|||')) {
-          [handle, standardId] = (cloned as any).mediaId.split('|||');
-          (comp as any).mediaId = standardId; // update the original dto to store the standard ID in DB
-        }
+      const type = (comp.type || '').toUpperCase();
 
-        const { mediaId, ...rest } = cloned as any;
-        metaComponents.push({
-          ...rest,
-          example: { header_handle: [handle] },
+      if (type === 'HEADER') {
+        if (comp.format && comp.format !== 'TEXT' && comp.mediaId) {
+          // Media header — split "uploadHandle|||standardId" written by uploadMedia
+          let handle = comp.mediaId;
+          let standardId = comp.mediaId;
+          if (comp.mediaId.includes('|||')) {
+            [handle, standardId] = comp.mediaId.split('|||');
+            (comp as any).mediaId = standardId; // persist standard ID to DB
+          }
+          metaComponents.push({
+            type: 'HEADER',
+            format: comp.format,
+            example: { header_handle: [handle] },
+          });
+        } else {
+          // Text header
+          const headerComp: any = { type: 'HEADER', format: comp.format || 'TEXT' };
+          if (comp.text) headerComp.text = comp.text;
+          if (comp.example) headerComp.example = comp.example;
+          metaComponents.push(headerComp);
+        }
+      } else if (type === 'BODY') {
+        const bodyComp: any = { type: 'BODY', text: comp.text };
+        if (comp.example) bodyComp.example = comp.example;
+        metaComponents.push(bodyComp);
+      } else if (type === 'FOOTER') {
+        metaComponents.push({ type: 'FOOTER', text: comp.text });
+      } else if (type === 'BUTTONS') {
+        const buttons = (comp.buttons || []).map((btn) => {
+          const b: any = { type: btn.type, text: btn.text };
+          if (btn.url) b.url = btn.url;
+          if (btn.phone_number) b.phone_number = btn.phone_number;
+          return b;
         });
-      } else {
-        metaComponents.push(cloned);
+        metaComponents.push({ type: 'BUTTONS', buttons });
       }
     }
-    console.log("mediaComponents", JSON.stringify(metaComponents));
+    this.logger.debug(`Meta components: ${JSON.stringify(metaComponents)}`);
 
     // Submit to Meta
     let metaTemplateId: string | undefined;
@@ -161,7 +177,6 @@ export class TemplatesService {
     }
 
     const waba = await this.wabaService.findDefaultForOrg(orgId);
-    console.log("waba", waba)
     if (!waba) throw new BadRequestException('No active WABA found');
 
     try {

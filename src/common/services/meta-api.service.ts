@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance } from 'axios';
 import { MetaApiException } from '../exceptions/meta-api.exception';
 
-const META_API_VERSION = 'v19.0';
+const META_API_VERSION = 'v21.0';
 const META_BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
 
 @Injectable()
@@ -144,22 +144,15 @@ export class MetaApiService {
           },
         },
       );
-      console.log(res);
-      console.log(JSON.stringify(res.data?.data));
-      
       return res.data?.data || [];
     } catch (err: any) {
-      this.logger.error('Meta getTemplates error', err);
-      this.logger.error('Meta getTemplates error', err?.response);
+      this.logger.error('Meta getTemplates error', err?.response?.data);
       throw this.toMetaException(err);
     }
   }
 
   // ── Create template ────────────────────────────────────────────────
   async createTemplate(wabaId: string, accessToken: string, payload: any) {
-    console.log('Creating template with payload', payload);
-    console.log('accessToken', accessToken);
-    console.log('wabaId', wabaId);
     try {
       const res = await this.client(accessToken).post(
         `/${wabaId}/message_templates`,
