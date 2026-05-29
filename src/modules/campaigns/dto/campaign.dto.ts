@@ -76,3 +76,36 @@ export class CampaignQueryDto {
   @ApiPropertyOptional({ default: 20 })
   limit?: number;
 }
+
+export class CampaignOverviewQueryDto {
+  @ApiPropertyOptional({ default: 1 })
+  page?: number;
+
+  @ApiPropertyOptional({ default: 10, maximum: 100 })
+  limit?: number;
+
+  @ApiPropertyOptional({ description: 'Campaign name search (case-insensitive)' })
+  @IsString()
+  @IsOptional()
+  search?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by campaign status' })
+  @IsString()
+  @IsOptional()
+  status?: string;
+
+  @ApiPropertyOptional({ enum: CampaignType, description: 'Filter by campaign type' })
+  @IsEnum(CampaignType)
+  @IsOptional()
+  type?: CampaignType;
+
+  @ApiPropertyOptional({ description: 'createdAt range start (ISO date)' })
+  @IsDateString()
+  @IsOptional()
+  from?: string;
+
+  @ApiPropertyOptional({ description: 'createdAt range end (ISO date)' })
+  @IsDateString()
+  @IsOptional()
+  to?: string;
+}

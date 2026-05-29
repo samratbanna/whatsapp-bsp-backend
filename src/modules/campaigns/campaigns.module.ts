@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bull';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Campaign, CampaignSchema } from './schemas/campaign.schema';
+import { Message, MessageSchema } from '../messages/schemas/message.schema';
 import { CampaignsService } from './campaigns.service';
 import { CampaignsController } from './campaigns.controller';
 import { CampaignProcessor, CAMPAIGN_QUEUE } from './processors/campaign.processor';
@@ -12,7 +13,10 @@ import { WalletModule } from '../wallet/wallet.module';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: Campaign.name, schema: CampaignSchema }]),
+    MongooseModule.forFeature([
+      { name: Campaign.name, schema: CampaignSchema },
+      { name: Message.name, schema: MessageSchema },
+    ]),
     BullModule.registerQueue({ name: CAMPAIGN_QUEUE }),
     WabaModule,
     MessagesModule,

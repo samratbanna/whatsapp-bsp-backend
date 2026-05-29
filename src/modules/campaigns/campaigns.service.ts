@@ -6,7 +6,8 @@ import { InjectQueue } from '@nestjs/bull';
 import { Model, Types } from 'mongoose';
 import type { Queue } from 'bull';
 import { Campaign, CampaignDocument, CampaignStatus } from './schemas/campaign.schema';
-import { CreateCampaignDto, UpdateCampaignDto, CampaignQueryDto } from './dto/campaign.dto';
+import { Message, MessageDocument, MessageStatus } from '../messages/schemas/message.schema';
+import { CreateCampaignDto, UpdateCampaignDto, CampaignQueryDto, CampaignOverviewQueryDto } from './dto/campaign.dto';
 import { WabaService } from '../waba/waba.service';
 import { CAMPAIGN_QUEUE } from './processors/campaign.processor';
 
@@ -16,6 +17,7 @@ export class CampaignsService {
 
   constructor(
     @InjectModel(Campaign.name) private campaignModel: Model<CampaignDocument>,
+    @InjectModel(Message.name) private messageModel: Model<MessageDocument>,
     @InjectQueue(CAMPAIGN_QUEUE) private campaignQueue: Queue,
     private wabaService: WabaService,
   ) {}
@@ -167,6 +169,82 @@ export class CampaignsService {
     return { data, total, page, limit, pages: Math.ceil(total / limit) };
   }
 
+  async getOverview(orgId: string, query: CampaignOverviewQueryDto) {
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(query.limit) || 10));
+    const skip = (page - 1) * limit;
+
+    const filter: any = { organization: new Types.ObjectId(orgId) };
+    if (query.search) filter.name = { $regex: query.search, $options: 'i' };
+    if (query.status) filter.status = query.status;
+    if (query.type) filter.type = query.type;
+    if (query.from || query.to) {
+      filter.createdAt = {};
+      if (query.from) filter.createdAt.$gte = new Date(query.from);
+      if (query.to) filter.createdAt.$lte = new Date(query.to);
+    }
+
+    const [campaigns, total] = await Promise.all([
+      this.campaignModel
+        .find(filter)
+        .populate('template', 'name category')
+        .populate('waba', 'displayPhoneNumber verifiedName')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean()
+        .exec(),
+      this.campaignModel.countDocuments(filter),
+    ]);
+
+    const campaignIds = campaigns.map((c) => c._id);
+
+    const msgStats = campaignIds.length
+      ? await this.messageModel.aggregate([
+          { $match: { campaign: { $in: campaignIds } } },
+          {
+            $group: {
+              _id: { campaign: '$campaign', status: '$status' },
+              count: { $sum: 1 },
+            },
+          },
+        ])
+      : [];
+
+    const countsMap = new Map<string, Record<string, number>>();
+    for (const row of msgStats) {
+      const key = row._id.campaign.toString();
+      if (!countsMap.has(key)) countsMap.set(key, {});
+      countsMap.get(key)![row._id.status] = row.count;
+    }
+
+    const defaultCounts = { total: 0, queued: 0, sent: 0, delivered: 0, read: 0, failed: 0, success: 0 };
+
+    const data = campaigns.map((c) => {
+      const raw = countsMap.get((c._id as Types.ObjectId).toString()) ?? {};
+      const queued = raw['queued'] ?? 0;
+      const sent = raw['sent'] ?? 0;
+      const delivered = raw['delivered'] ?? 0;
+      const read = raw['read'] ?? 0;
+      const failed = raw['failed'] ?? 0;
+      const success = sent + delivered + read;
+      return {
+        ...c,
+        messageCounts: {
+          total: queued + sent + delivered + read + failed,
+          queued,
+          sent,
+          delivered,
+          read,
+          failed,
+          success,
+        },
+      };
+    });
+
+    return { data, total, page, limit, pages: Math.ceil(total / limit) };
+  }
+
   async findOne(id: string, orgId: string): Promise<CampaignDocument> {
     const campaign = await this.campaignModel
       .findOne({ _id: id, organization: new Types.ObjectId(orgId) })
@@ -194,12 +272,83 @@ export class CampaignsService {
     await campaign.deleteOne();
   }
 
+  async getCampaignReportStats(id: string, orgId: string) {
+    const campaign = await this.campaignModel
+      .findOne({ _id: id, organization: new Types.ObjectId(orgId) })
+      .populate('template', 'name')
+      .exec();
+    if (!campaign) throw new NotFoundException('Campaign not found');
+
+    const campaignObjId = new Types.ObjectId(id);
+
+    const counts = await this.messageModel.aggregate([
+      { $match: { campaign: campaignObjId } },
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const statusMap: Record<string, number> = {};
+    counts.forEach((c) => { statusMap[c._id] = c.count; });
+
+    const sent = statusMap[MessageStatus.SENT] ?? 0;
+    const delivered = statusMap[MessageStatus.DELIVERED] ?? 0;
+    const read = statusMap[MessageStatus.READ] ?? 0;
+    const failed = statusMap[MessageStatus.FAILED] ?? 0;
+    const queued = statusMap[MessageStatus.QUEUED] ?? 0;
+    const total = sent + delivered + read + failed + queued;
+    const success = sent + delivered + read;
+
+    return {
+      campaignId: id,
+      campaignName: campaign.name,
+      status: campaign.status,
+      template: (campaign.template as any)?.name ?? '',
+      startedAt: campaign.startedAt ?? null,
+      completedAt: campaign.completedAt ?? null,
+      total,
+      success,
+      sent,
+      delivered,
+      read,
+      failed,
+      queued,
+    };
+  }
+
   async generateReport(id: string, orgId: string): Promise<Buffer> {
     const campaign = await this.campaignModel
       .findOne({ _id: id, organization: new Types.ObjectId(orgId) })
       .populate('template', 'name')
       .exec();
     if (!campaign) throw new NotFoundException('Campaign not found');
+
+    const campaignObjId = new Types.ObjectId(id);
+
+    const [stats, failedMessages] = await Promise.all([
+      this.messageModel.aggregate([
+        { $match: { campaign: campaignObjId } },
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+      ]),
+      this.messageModel
+        .find({ campaign: campaignObjId, status: MessageStatus.FAILED })
+        .select('to failureReason failedAt')
+        .sort({ failedAt: 1 })
+        .lean()
+        .exec(),
+    ]);
+
+    const statusMap: Record<string, number> = {};
+    stats.forEach((c) => { statusMap[c._id] = c.count; });
+
+    const sent = statusMap[MessageStatus.SENT] ?? 0;
+    const delivered = statusMap[MessageStatus.DELIVERED] ?? 0;
+    const read = statusMap[MessageStatus.READ] ?? 0;
+    const failed = statusMap[MessageStatus.FAILED] ?? 0;
+    const queued = statusMap[MessageStatus.QUEUED] ?? 0;
 
     const ExcelJS = await import('exceljs');
     const WorkbookClass = (ExcelJS as any).default?.Workbook ?? (ExcelJS as any).Workbook;
@@ -214,32 +363,39 @@ export class CampaignsService {
     summary.getRow(1).font = { bold: true };
 
     const templateName = (campaign.template as any)?.name ?? '';
-    const rows = [
+    const summaryRows = [
       ['Campaign Name', campaign.name],
       ['Status', campaign.status],
       ['Template', templateName],
-      ['Total Contacts', campaign.totalCount],
-      ['Sent', campaign.sentCount],
-      ['Failed', campaign.failedCount],
-      ['Delivered', campaign.deliveredCount],
-      ['Read', campaign.readCount],
+      ['Total', sent + delivered + read + failed + queued],
+      ['Success (Sent + Delivered + Read)', sent + delivered + read],
+      ['Sent', sent],
+      ['Delivered', delivered],
+      ['Read', read],
+      ['Failed', failed],
+      ['Queued', queued],
       ['Started At', campaign.startedAt?.toISOString() ?? '—'],
       ['Completed At', campaign.completedAt?.toISOString() ?? '—'],
-      ['Failure Reason', campaign.failureReason ?? '—'],
     ];
-    rows.forEach(([field, value]) => summary.addRow({ field, value }));
+    summaryRows.forEach(([field, value]) => summary.addRow({ field, value }));
 
-    // ── Failed contacts sheet ──────────────────────────────────────────
-    const failedSheet = workbook.addWorksheet('Failed Contacts');
+    // ── Failed messages sheet ──────────────────────────────────────────
+    const failedSheet = workbook.addWorksheet('Failed Messages');
     failedSheet.columns = [
       { header: '#', key: 'index', width: 6 },
       { header: 'Phone', key: 'phone', width: 20 },
       { header: 'Failure Reason', key: 'reason', width: 70 },
+      { header: 'Failed At', key: 'failedAt', width: 25 },
     ];
     failedSheet.getRow(1).font = { bold: true };
 
-    (campaign.failedContacts || []).forEach((fc, i) => {
-      failedSheet.addRow({ index: i + 1, phone: fc.phone, reason: fc.reason });
+    failedMessages.forEach((msg, i) => {
+      failedSheet.addRow({
+        index: i + 1,
+        phone: msg.to,
+        reason: msg.failureReason ?? '—',
+        failedAt: msg.failedAt ? new Date(msg.failedAt).toISOString() : '—',
+      });
     });
 
     const buffer = await workbook.xlsx.writeBuffer();

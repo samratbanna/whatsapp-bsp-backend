@@ -10,7 +10,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Role } from '../../common/enums';
 import { CampaignsService } from './campaigns.service';
-import { CreateCampaignDto, UpdateCampaignDto, CampaignQueryDto } from './dto/campaign.dto';
+import { CreateCampaignDto, UpdateCampaignDto, CampaignQueryDto, CampaignOverviewQueryDto } from './dto/campaign.dto';
 
 @ApiTags('Campaigns')
 @ApiBearerAuth()
@@ -33,6 +33,11 @@ export class CampaignsController {
   @Get('stats')
   getStats(@CurrentUser('orgId') orgId: string) {
     return this.campaignsService.getStats(orgId);
+  }
+
+  @Get('overview')
+  getOverview(@CurrentUser('orgId') orgId: string, @Query() query: CampaignOverviewQueryDto) {
+    return this.campaignsService.getOverview(orgId, query);
   }
 
   @Get(':id')
@@ -67,6 +72,11 @@ export class CampaignsController {
   @Patch(':id/cancel')
   cancel(@Param('id') id: string, @CurrentUser('orgId') orgId: string) {
     return this.campaignsService.cancel(id, orgId);
+  }
+
+  @Get(':id/report/stats')
+  getReportStats(@Param('id') id: string, @CurrentUser('orgId') orgId: string) {
+    return this.campaignsService.getCampaignReportStats(id, orgId);
   }
 
   @Get(':id/report')
