@@ -5,6 +5,8 @@ import { WabaService } from '../waba/waba.service';
 import { MetaApiService } from '../../common/services/meta-api.service';
 import { FlowExecutor } from '../flow-builder/executors/flow.executor';
 import { InboxGateway } from '../inbox/gateways/inbox.gateway';
+import { ConversationsService } from '../conversations/conversations.service';
+import { ConversationOrigin } from '../conversations/schemas/conversation.schema';
 import { log } from 'console';
 
 @Injectable()
@@ -18,6 +20,7 @@ export class WebhookService {
     private metaApi: MetaApiService,
     @Optional() private flowExecutor?: FlowExecutor,
     @Optional() private inboxGateway?: InboxGateway,
+    @Optional() private conversationsService?: ConversationsService,
   ) {}
 
   verifyToken(token: string): boolean {
@@ -81,8 +84,46 @@ export class WebhookService {
         const stored = await this.messagesService.storeInbound(orgId, wabaDbId, message, waba.displayPhoneNumber);
         this.logger.log(`Inbound stored: ${stored._id}`);
 
-        // Broadcast to live inbox via Socket.io
+        // Broadcast to live inbox via Socket.io (existing flow — unchanged)
         this.inboxGateway?.broadcastInbound(orgId, stored);
+
+        // ── Conversation flow (new — does not affect existing message flow) ──
+        if (this.conversationsService) {
+          try {
+            // Check if this phone was a campaign recipient
+            const campaignId = await this.messagesService.findCampaignByPhone(
+              orgId, wabaDbId, message.from,
+            );
+
+            const origin = campaignId
+              ? ConversationOrigin.CAMPAIGN
+              : ConversationOrigin.INBOUND;
+
+            const { conversation, isNew } =
+              await this.conversationsService.findOrCreate(
+                orgId,
+                wabaDbId,
+                message.from,
+                origin,
+                campaignId?.toString(),
+              );
+
+            const updatedConv = await this.conversationsService.updateAfterMessage(
+              (conversation._id as any).toString(),
+              stored,
+            );
+
+            if (isNew) {
+              this.inboxGateway?.broadcastNewConversation(orgId, updatedConv);
+            } else {
+              this.inboxGateway?.broadcastConversationUpdate(orgId, updatedConv);
+            }
+          } catch (convErr: any) {
+            // Conversation errors must never break the main inbound message flow
+            this.logger.error(`Conversation flow error: ${convErr.message}`);
+          }
+        }
+        // ── End conversation flow ──────────────────────────────────────
 
         // Auto mark as read
         await this.metaApi.markAsRead(phoneNumberId, waba.accessToken, message.id);

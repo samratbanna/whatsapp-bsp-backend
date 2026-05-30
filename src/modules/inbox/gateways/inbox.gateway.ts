@@ -150,6 +150,28 @@ export class InboxGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(`org:${orgId}`).emit('message:status', update);
   }
 
+  // ── Conversation broadcast methods (called from ConversationsService / WebhookService) ──
+
+  // A brand-new conversation was created (first reply from a phone)
+  broadcastNewConversation(orgId: string, conversation: any) {
+    this.server.to(`org:${orgId}`).emit('new:conversation', conversation);
+  }
+
+  // An existing conversation was updated (new message, unreadCount, lastMessage changed)
+  broadcastConversationUpdate(orgId: string, conversation: any) {
+    this.server.to(`org:${orgId}`).emit('conversation:update', conversation);
+  }
+
+  // Conversation status changed: open / resolved
+  broadcastConversationStatus(orgId: string, id: string, status: string) {
+    this.server.to(`org:${orgId}`).emit('conversation:status', { id, status });
+  }
+
+  // Conversation assigned to an agent
+  broadcastConversationAssigned(orgId: string, id: string, userId: string) {
+    this.server.to(`org:${orgId}`).emit('conversation:assigned', { id, userId });
+  }
+
   // Get online agent count for an org
   getOnlineAgentCount(orgId: string): number {
     return Array.from(this.connectedClients.values()).filter(

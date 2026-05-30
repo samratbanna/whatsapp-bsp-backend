@@ -29,6 +29,7 @@ import { PublicApiModule } from './modules/public-api/public-api.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { PricingModule } from './modules/pricing/pricing.module';
+import { ConversationsModule } from './modules/conversations/conversations.module';
 
 @Module({
   imports: [
@@ -91,6 +92,7 @@ import { PricingModule } from './modules/pricing/pricing.module';
     AnalyticsModule,
     WalletModule,
     PricingModule,
+    ConversationsModule,
   ],
 })
 export class AppModule {}

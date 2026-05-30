@@ -379,6 +379,28 @@ export class MessagesService {
     return { total, today: todayCount, inbound, outbound, failed };
   }
 
+  // ── Find the most recent campaign that sent to a given phone ─────
+  // Used by WebhookService to tag a new conversation with its origin campaign.
+  async findCampaignByPhone(
+    orgId: string,
+    wabaId: string,
+    phone: string,
+  ): Promise<Types.ObjectId | null> {
+    const msg = await this.messageModel
+      .findOne({
+        organization: new Types.ObjectId(orgId),
+        waba:         new Types.ObjectId(wabaId),
+        to:           phone,
+        direction:    MessageDirection.OUTBOUND,
+        campaign:     { $ne: null },
+      })
+      .sort({ createdAt: -1 })
+      .select('campaign')
+      .lean();
+
+    return (msg?.campaign as Types.ObjectId) ?? null;
+  }
+
   // ── Mark all inbound messages from a contact as read ──────────────
   async markConversationRead(
     orgId: string,
