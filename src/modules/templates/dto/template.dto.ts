@@ -71,6 +71,19 @@ export class CreateTemplateDto {
   wabaId?: string;
 }
 
+export class UpdateTemplateDto {
+  @ApiProperty({ type: [TemplateComponentDto], description: 'Updated template components' })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => TemplateComponentDto)
+  components: TemplateComponentDto[];
+
+  @ApiPropertyOptional({ enum: TemplateCategory, description: 'Updated category (optional)' })
+  @IsEnum(TemplateCategory)
+  @IsOptional()
+  category?: TemplateCategory;
+}
+
 export class TemplateQueryDto {
   @ApiPropertyOptional()
   @IsString()

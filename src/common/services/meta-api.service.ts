@@ -179,6 +179,20 @@ export class MetaApiService {
     }
   }
 
+  // ── Edit template (components / category only) ─────────────────────
+  async updateTemplate(metaTemplateId: string, accessToken: string, payload: { components?: any[]; category?: string }) {
+    try {
+      const res = await this.client(accessToken).post(
+        `/${metaTemplateId}`,
+        payload,
+      );
+      return res.data;
+    } catch (err: any) {
+      this.logger.error('Meta updateTemplate error', err?.response?.data);
+      throw this.toMetaException(err);
+    }
+  }
+
   // ── Get phone number info ──────────────────────────────────────────
   async getPhoneNumberInfo(phoneNumberId: string, accessToken: string) {
     try {

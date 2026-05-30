@@ -11,7 +11,7 @@ import {
   TemplateDocument,
   TemplateStatus,
 } from './schemas/template.schema';
-import { CreateTemplateDto, TemplateQueryDto } from './dto/template.dto';
+import { CreateTemplateDto, UpdateTemplateDto, TemplateQueryDto } from './dto/template.dto';
 import { WabaService } from '../waba/waba.service';
 import { MetaApiService } from '../../common/services/meta-api.service';
 
@@ -206,7 +206,7 @@ export class TemplatesService {
   async syncFromMeta(
     orgId: string,
     wabaId?: string,
-  ): Promise<{ synced: number }> {
+  ): Promise<{ synced: number; skipped: number }> {
     const waba = wabaId
       ? await this.wabaService.findOne(wabaId, orgId)
       : await this.wabaService.findDefaultForOrg(orgId);
@@ -218,19 +218,31 @@ export class TemplatesService {
       waba.accessToken,
     );
 
-    // Fetch existing templates to preserve custom fields like mediaId
+    // Fetch existing templates to build lookup maps (by name and by metaTemplateId)
     const existingTemplates = await this.templateModel.find({
       organization: new Types.ObjectId(orgId),
       waba: waba._id,
     }).lean();
-    const existingMap = new Map(existingTemplates.map(t => [t.name, t]));
+    const existingByName = new Map(existingTemplates.map(t => [t.name, t]));
+    const existingMetaIds = new Set(
+      existingTemplates.map(t => t.metaTemplateId).filter(Boolean),
+    );
 
     let synced = 0;
+    let skipped = 0;
     for (const mt of metaTemplates) {
-      const existing = existingMap.get(mt.name);
+      // Skip if this metaTemplateId is already stored under a different name entry
+      // (prevents duplicate DB documents for the same Meta template)
+      const alreadyExists = existingMetaIds.has(mt.id) && !existingByName.has(mt.name);
+      if (alreadyExists) {
+        skipped++;
+        continue;
+      }
+
+      const existing = existingByName.get(mt.name);
       const components = mt.components || [];
 
-      // Preserve mediaId
+      // Preserve mediaId from existing DB record
       if (existing && existing.components) {
         for (const comp of components) {
           if (comp.type === 'HEADER') {
@@ -266,7 +278,7 @@ export class TemplatesService {
       synced++;
     }
 
-    return { synced };
+    return { synced, skipped };
   }
 
   // ── Find all ───────────────────────────────────────────────────────
@@ -297,13 +309,76 @@ export class TemplatesService {
     return template;
   }
 
+  // ── Edit template (components + optional category) ─────────────────
+  async update(id: string, orgId: string, dto: UpdateTemplateDto): Promise<TemplateDocument> {
+    const template = await this.findOne(id, orgId);
+
+    if (!template.metaTemplateId) {
+      throw new BadRequestException('Template has no Meta ID — cannot edit on Meta');
+    }
+
+    const wabaId = (template.waba as any)._id?.toString() ?? template.waba.toString();
+    const waba = await this.wabaService.findOne(wabaId);
+
+    // Build Meta-compatible components (same logic as create)
+    const metaComponents: any[] = [];
+    for (const comp of dto.components) {
+      const type = (comp.type || '').toUpperCase();
+      if (type === 'HEADER') {
+        if (comp.format && comp.format !== 'TEXT' && comp.mediaId) {
+          let handle = comp.mediaId;
+          let standardId = comp.mediaId;
+          if (comp.mediaId.includes('|||')) {
+            [handle, standardId] = comp.mediaId.split('|||');
+            (comp as any).mediaId = standardId;
+          }
+          metaComponents.push({ type: 'HEADER', format: comp.format, example: { header_handle: [handle] } });
+        } else {
+          const headerComp: any = { type: 'HEADER', format: comp.format || 'TEXT' };
+          if (comp.text) headerComp.text = comp.text;
+          if (comp.example) headerComp.example = comp.example;
+          metaComponents.push(headerComp);
+        }
+      } else if (type === 'BODY') {
+        const bodyComp: any = { type: 'BODY', text: comp.text };
+        if (comp.example) bodyComp.example = comp.example;
+        metaComponents.push(bodyComp);
+      } else if (type === 'FOOTER') {
+        metaComponents.push({ type: 'FOOTER', text: comp.text });
+      } else if (type === 'BUTTONS') {
+        const buttons = (comp.buttons || []).map((btn) => {
+          const b: any = { type: btn.type, text: btn.text };
+          if (btn.url) b.url = btn.url;
+          if (btn.phone_number) b.phone_number = btn.phone_number;
+          return b;
+        });
+        metaComponents.push({ type: 'BUTTONS', buttons });
+      }
+    }
+
+    const metaPayload: any = { components: metaComponents };
+    if (dto.category) metaPayload.category = dto.category;
+
+    try {
+      await this.metaApi.updateTemplate(template.metaTemplateId, waba.accessToken, metaPayload);
+    } catch (err: any) {
+      this.logger.error('Meta update template failed', err.message);
+      throw err;
+    }
+
+    template.components = dto.components as any[];
+    template.variables = this.extractVariables(dto.components);
+    if (dto.category) template.category = dto.category;
+    template.status = TemplateStatus.PENDING;
+    template.lastSyncedAt = new Date();
+    return template.save();
+  }
+
   // ── Delete ─────────────────────────────────────────────────────────
   async remove(id: string, orgId: string): Promise<void> {
     const template = await this.findOne(id, orgId);
-    const waba = await this.wabaService.findOne(
-      template.waba.toString(),
-      orgId,
-    );
+    const wabaId = (template.waba as any)._id?.toString() ?? template.waba.toString();
+    const waba = await this.wabaService.findOne(wabaId);
 
     try {
       await this.metaApi.deleteTemplate(

@@ -76,4 +76,5 @@ export class Template {
 
 export const TemplateSchema = SchemaFactory.createForClass(Template);
 TemplateSchema.index({ organization: 1, waba: 1, name: 1 }, { unique: true });
+TemplateSchema.index({ metaTemplateId: 1 }, { unique: true, sparse: true });
 TemplateSchema.index({ status: 1 });

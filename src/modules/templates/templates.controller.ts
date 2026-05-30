@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Delete,
   Body,
   Param,
@@ -19,7 +20,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Role } from '../../common/enums';
 import { TemplatesService } from './templates.service';
-import { CreateTemplateDto, TemplateQueryDto } from './dto/template.dto';
+import { CreateTemplateDto, UpdateTemplateDto, TemplateQueryDto } from './dto/template.dto';
 
 const MAX_TEMPLATE_MEDIA_UPLOAD_BYTES = 100 * 1024 * 1024;
 const TEMPLATE_MEDIA_MIME_TYPES = new Set([
@@ -99,6 +100,15 @@ export class TemplatesController {
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentUser('orgId') orgId: string) {
     return this.templatesService.findOne(id, orgId);
+  }
+
+  @Put(':id')
+  update(
+    @Param('id') id: string,
+    @CurrentUser('orgId') orgId: string,
+    @Body() dto: UpdateTemplateDto,
+  ) {
+    return this.templatesService.update(id, orgId, dto);
   }
 
   @Delete(':id')
