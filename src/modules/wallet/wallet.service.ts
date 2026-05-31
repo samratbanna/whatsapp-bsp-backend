@@ -222,13 +222,15 @@ export class WalletService {
   }
 
   // ── KEY: Deduct 1 credit on message send ──────────────────────────
+  // Returns the created transaction so callers can later link the metaMessageId
+  // via linkMetaMessageId() once Meta confirms the send.
   async deductCredit(
     orgId: string,
     category: WalletCategory,
     messageId?: string,
     campaignId?: string,
     metaMessageId?: string,
-  ): Promise<void> {
+  ): Promise<WalletTransactionDocument> {
     const wallet = await this.getOrCreate(orgId);
 
     const current = wallet[category] as number;
@@ -246,7 +248,7 @@ export class WalletService {
     (wallet as any)[`total${cap(category)}Used`] += 1;
     await wallet.save();
 
-    await this.txModel.create({
+    const tx = await this.txModel.create({
       organization: new Types.ObjectId(orgId),
       wallet: wallet._id,
       type: TransactionType.DEBIT,
@@ -270,6 +272,13 @@ export class WalletService {
       this.logger.warn(`Low credits alert: org=${orgId} cat=${category} remaining=${creditsAfter}`);
       // TODO: emit email/push notification
     }
+
+    return tx;
+  }
+
+  // ── Link wamid to debit transaction after Meta confirms send ───────
+  async linkMetaMessageId(txId: string, metaMessageId: string): Promise<void> {
+    await this.txModel.findByIdAndUpdate(txId, { metaMessageId });
   }
 
   // ── Refund 1 credit on Meta delivery failure ───────────────────────

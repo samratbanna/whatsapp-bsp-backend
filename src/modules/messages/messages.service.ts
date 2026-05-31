@@ -61,9 +61,10 @@ export class MessagesService {
 
     if (!waba) throw new BadRequestException('No active WABA found for this organization');
 
-    // Deduct transactional credit for SHARED WABA
+    let debitTxId: string | undefined;
     if (waba.walletBillingEnabled) {
-      await this.walletService.deductCredit(orgId, WalletCategory.TRANSACTIONAL);
+      const tx = await this.walletService.deductCredit(orgId, WalletCategory.TRANSACTIONAL);
+      debitTxId = (tx as any)._id?.toString();
     }
 
     const payload = {
@@ -73,11 +74,17 @@ export class MessagesService {
     };
 
     const result = await this.sendWithAutoRefresh(waba, payload);
+    const wamid = result.messages?.[0]?.id;
+
+    if (debitTxId && wamid) {
+      (this.walletService as any).linkMetaMessageId(debitTxId, wamid)
+        .catch((err: any) => this.logger.warn(`Failed to link metaMessageId on text send: ${err.message}`));
+    }
 
     return this.messageModel.create({
       organization: new Types.ObjectId(orgId),
       waba: waba._id,
-      metaMessageId: result.messages?.[0]?.id,
+      metaMessageId: wamid,
       from: waba.displayPhoneNumber,
       to: dto.to,
       direction: MessageDirection.OUTBOUND,
@@ -96,10 +103,11 @@ export class MessagesService {
 
     if (!waba) throw new BadRequestException('No active WABA found');
 
-    // Map template category → wallet category and deduct
+    let debitTxId: string | undefined;
     if (waba.walletBillingEnabled) {
       const walletCat = WalletService.toWalletCategory(dto.category || 'UTILITY');
-      await this.walletService.deductCredit(orgId, walletCat);
+      const tx = await this.walletService.deductCredit(orgId, walletCat);
+      debitTxId = (tx._id as any).toString();
     }
 
     const payload = {
@@ -113,11 +121,17 @@ export class MessagesService {
     };
 
     const result = await this.sendWithAutoRefresh(waba, payload);
+    const wamid = result.messages?.[0]?.id;
+
+    if (debitTxId && wamid) {
+      this.walletService.linkMetaMessageId(debitTxId, wamid)
+        .catch((err: any) => this.logger.warn(`Failed to link metaMessageId on template send: ${err.message}`));
+    }
 
     return this.messageModel.create({
       organization: new Types.ObjectId(orgId),
       waba: waba._id,
-      metaMessageId: result.messages?.[0]?.id,
+      metaMessageId: wamid,
       from: waba.displayPhoneNumber,
       to: dto.to,
       direction: MessageDirection.OUTBOUND,
@@ -140,9 +154,10 @@ export class MessagesService {
 
     if (!waba) throw new BadRequestException('No active WABA found');
 
-    // Media sent in service window → transactional credit
+    let debitTxId: string | undefined;
     if (waba.walletBillingEnabled) {
-      await this.walletService.deductCredit(orgId, WalletCategory.TRANSACTIONAL);
+      const tx = await this.walletService.deductCredit(orgId, WalletCategory.TRANSACTIONAL);
+      debitTxId = (tx._id as any).toString();
     }
 
     const typeKey = dto.type.toLowerCase();
@@ -157,11 +172,17 @@ export class MessagesService {
     };
 
     const result = await this.sendWithAutoRefresh(waba, payload);
+    const wamid = result.messages?.[0]?.id;
+
+    if (debitTxId && wamid) {
+      this.walletService.linkMetaMessageId(debitTxId, wamid)
+        .catch((err: any) => this.logger.warn(`Failed to link metaMessageId on media send: ${err.message}`));
+    }
 
     return this.messageModel.create({
       organization: new Types.ObjectId(orgId),
       waba: waba._id,
-      metaMessageId: result.messages?.[0]?.id,
+      metaMessageId: wamid,
       from: waba.displayPhoneNumber,
       to: dto.to,
       direction: MessageDirection.OUTBOUND,
@@ -246,11 +267,19 @@ export class MessagesService {
         const details = errorData?.error_data?.details;
         updateData.failureReason = details ? `${title} — ${details}` : title;
 
-        // Refund 1 credit on Meta failure
+        // Refund credit and mark message as refunded (fire-and-forget, idempotent)
         if (orgId) {
-          this.walletService
-            .refundCredit(orgId, metaMessageId, errorData?.title || 'Delivery failed')
-            .catch((err) => this.logger.warn(`Refund failed: ${err.message}`));
+          (async () => {
+            try {
+              await this.walletService.refundCredit(orgId, metaMessageId, errorData?.title || 'Delivery failed');
+              await this.messageModel.findOneAndUpdate(
+                { metaMessageId },
+                { $set: { creditRefunded: true } },
+              );
+            } catch (err: any) {
+              this.logger.warn(`Refund failed for ${metaMessageId}: ${err.message}`);
+            }
+          })();
         }
         break;
       }

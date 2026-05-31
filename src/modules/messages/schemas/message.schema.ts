@@ -98,6 +98,9 @@ export class Message {
   @Prop({ trim: true })
   failureReason?: string;
 
+  @Prop({ default: false })
+  creditRefunded: boolean;
+
   // Conversation window (24h)
   @Prop({ type: Date })
   conversationWindowExpiry?: Date;
