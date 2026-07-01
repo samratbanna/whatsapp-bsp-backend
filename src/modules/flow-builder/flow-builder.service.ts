@@ -91,4 +91,12 @@ export class FlowBuilderService {
       .limit(100)
       .exec();
   }
+
+  async clearSession(orgId: string, phone: string): Promise<{ cleared: number }> {
+    const result = await this.sessionModel.updateMany(
+      { organization: new Types.ObjectId(orgId), phone, isActive: true },
+      { $set: { isActive: false } },
+    );
+    return { cleared: result.modifiedCount };
+  }
 }

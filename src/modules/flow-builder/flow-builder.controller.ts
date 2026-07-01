@@ -34,6 +34,14 @@ export class FlowBuilderController {
     return this.flowService.getActiveSessions(orgId);
   }
 
+  @Delete('sessions/:phone')
+  clearSession(
+    @Param('phone') phone: string,
+    @CurrentUser('orgId') orgId: string,
+  ) {
+    return this.flowService.clearSession(orgId, phone);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentUser('orgId') orgId: string) {
     return this.flowService.findOne(id, orgId);

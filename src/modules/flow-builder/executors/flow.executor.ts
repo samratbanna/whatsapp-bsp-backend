@@ -316,10 +316,16 @@ export class FlowExecutor {
 
   // ── Find matching flow by trigger keyword ──────────────────────────
   private async findMatchingFlow(orgId: string, text: string): Promise<FlowDocument | null> {
+    this.logger.log(`findMatchingFlow START: orgId=${orgId} text="${text}"`);
     const flows = await this.flowModel
       .find({ organization: new Types.ObjectId(orgId), status: 'active' })
       .sort({ priority: -1 })
       .exec();
+
+    this.logger.log(
+      `findMatchingFlow RESULT: found ${flows.length} active flow(s): ` +
+      flows.map((f) => `"${f.name}"[${f._id}](trigger=${f.trigger?.type},keys=${JSON.stringify(f.trigger?.keywords)})`).join(', '),
+    );
 
     for (const flow of flows) {
       const trigger = flow.trigger;
