@@ -69,8 +69,21 @@ export class FlowExecutor {
       return;
     }
 
-    // Store user input as variable if node expects it
-    if (currentNode.data?.captureInput) {
+    if (currentNode.type === NodeType.ASK_QUESTION) {
+      const varName = currentNode.data.variableName || 'last_input';
+      session.variables[varName] = message.text?.body || '';
+      session.currentNodeId = currentNode.next || '';
+      await session.save();
+    } else if (currentNode.type === NodeType.QUICK_REPLY) {
+      const buttonId = message.interactive?.button_reply?.id || message.text?.body || '';
+      const matched = (currentNode.data.buttons || []).find((b: any) => b.id === buttonId);
+      if (currentNode.data.variableName) {
+        session.variables[currentNode.data.variableName] =
+          message.interactive?.button_reply?.title || buttonId;
+      }
+      session.currentNodeId = matched?.next || currentNode.next || '';
+      await session.save();
+    } else if (currentNode.data?.captureInput) {
       const varName = currentNode.data.variableName || 'last_input';
       session.variables[varName] = message.text?.body || '';
       await session.save();
@@ -240,6 +253,46 @@ export class FlowExecutor {
 
       case NodeType.JUMP:
         return node.data.targetNodeId || 'end';
+
+      case NodeType.ASK_QUESTION: {
+        const question = this.interpolate(node.data.question || '', session.variables);
+        await this.metaApi.sendMessageAutoRefresh(
+          waba.phoneNumberId,
+          waba.accessToken,
+          { to: session.phone, type: 'text', text: { body: question } },
+          async (newToken) => {
+            waba.accessToken = newToken;
+            await this.wabaService.updateAccessToken(waba._id.toString(), newToken);
+          },
+        );
+        return 'wait';
+      }
+
+      case NodeType.QUICK_REPLY: {
+        const body = this.interpolate(node.data.body || '', session.variables);
+        const buttons = (node.data.buttons as any[] || []).slice(0, 3).map((b) => ({
+          type: 'reply',
+          reply: { id: b.id, title: b.title },
+        }));
+        await this.metaApi.sendMessageAutoRefresh(
+          waba.phoneNumberId,
+          waba.accessToken,
+          {
+            to: session.phone,
+            type: 'interactive',
+            interactive: {
+              type: 'button',
+              body: { text: body },
+              action: { buttons },
+            },
+          },
+          async (newToken) => {
+            waba.accessToken = newToken;
+            await this.wabaService.updateAccessToken(waba._id.toString(), newToken);
+          },
+        );
+        return 'wait';
+      }
 
       case NodeType.RESET_FLOW:
         return 'reset';

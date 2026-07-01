@@ -23,6 +23,8 @@ export enum NodeType {
   ASSIGN_AGENT = 'assign_agent',
   ADD_LABEL = 'add_label',
   RESET_FLOW = 'reset_flow',
+  ASK_QUESTION = 'ask_question',
+  QUICK_REPLY = 'quick_reply',
 }
 
 @Schema({ timestamps: true })

@@ -39,7 +39,7 @@ export class WabaService {
       // If the exchange fails the token may already be long-lived or a system
       // user token — store it as-is and let it fail at send time if invalid.
     }
-
+  
     const ownershipType = dto.ownershipType || WabaOwnershipType.SHARED;
 
     // SHARED: wallet billing enabled by default. BYO can still explicitly disable it.
