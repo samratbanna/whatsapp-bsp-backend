@@ -21,6 +21,7 @@ export class FlowExecutor {
   async processInbound(orgId: string, wabaDbId: string, message: any): Promise<void> {
     const phone = message.from;
     const text = message.text?.body || '';
+    this.logger.log(`FlowExecutor: inbound from=${phone} text="${text}" orgId=${orgId}`);
 
     // 1. Check if there's an active session for this contact
     let session = await this.sessionModel.findOne({
@@ -30,17 +31,25 @@ export class FlowExecutor {
     }).populate('flow');
 
     if (session) {
+      this.logger.log(`FlowExecutor: resuming session ${session._id} at node ${session.currentNodeId}`);
       await this.continueFlow(session, message, orgId, wabaDbId);
       return;
     }
 
     // 2. Find a matching flow trigger
     const flow = await this.findMatchingFlow(orgId, text);
-    if (!flow) return;
+    if (!flow) {
+      this.logger.log(`FlowExecutor: no matching flow for orgId=${orgId} text="${text}"`);
+      return;
+    }
+    this.logger.log(`FlowExecutor: matched flow "${flow.name}" (${flow._id})`);
 
     // 3. Start new session
     const triggerNode = flow.nodes.find((n) => n.type === NodeType.TRIGGER);
-    if (!triggerNode) return;
+    if (!triggerNode) {
+      this.logger.warn(`FlowExecutor: flow "${flow.name}" has no TRIGGER node — skipping`);
+      return;
+    }
 
     session = await this.sessionModel.create({
       organization: new Types.ObjectId(orgId),
@@ -135,8 +144,8 @@ export class FlowExecutor {
         nodeId = result || node.next || '';
         session.currentNodeId = nodeId;
         await session.save();
-      } catch (err) {
-        this.logger.error(`Flow node error [${node.type}]: ${err.message}`);
+      } catch (err: any) {
+        this.logger.error(`Flow node error [${node.type}]: ${err?.message ?? err}`);
         break;
       }
     }
@@ -237,8 +246,8 @@ export class FlowExecutor {
             }
             await session.save();
           }
-        } catch (err) {
-          this.logger.warn(`API request node failed: ${err.message}`);
+        } catch (err: any) {
+          this.logger.warn(`API request node failed: ${err?.message ?? err}`);
           if (node.data.onError === 'continue') return node.next || 'end';
           return 'end';
         }
