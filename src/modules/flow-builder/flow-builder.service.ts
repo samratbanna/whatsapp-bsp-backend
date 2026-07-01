@@ -32,20 +32,25 @@ export class FlowBuilderService {
   }
 
   async findAll(orgId: string, status?: string): Promise<FlowDocument[]> {
-    const filter: any = { organization: new Types.ObjectId(orgId) };
+    const filter: any = {};
+    if (orgId) filter.organization = new Types.ObjectId(orgId);
     if (status) filter.status = status;
     return this.flowModel.find(filter).populate('waba', 'displayPhoneNumber').sort({ priority: -1, createdAt: -1 }).exec();
   }
 
-  async findOne(id: string, orgId: string): Promise<FlowDocument> {
-    const flow = await this.flowModel.findOne({ _id: id, organization: new Types.ObjectId(orgId) }).exec();
+  async findOne(id: string, orgId?: string): Promise<FlowDocument> {
+    const filter: any = { _id: id };
+    if (orgId) filter.organization = new Types.ObjectId(orgId);
+    const flow = await this.flowModel.findOne(filter).exec();
     if (!flow) throw new NotFoundException('Flow not found');
     return flow;
   }
 
   async update(id: string, orgId: string, dto: UpdateFlowDto): Promise<FlowDocument> {
+    const filter: any = { _id: id };
+    if (orgId) filter.organization = new Types.ObjectId(orgId);
     const flow = await this.flowModel
-      .findOneAndUpdate({ _id: id, organization: new Types.ObjectId(orgId) }, { $set: dto }, { new: true })
+      .findOneAndUpdate(filter, { $set: dto }, { new: true })
       .exec();
     if (!flow) throw new NotFoundException('Flow not found');
     return flow;
@@ -60,8 +65,7 @@ export class FlowBuilderService {
   }
 
   async remove(id: string, orgId: string): Promise<void> {
-    const flow = await this.flowModel.findOne({ _id: id, organization: new Types.ObjectId(orgId) });
-    if (!flow) throw new NotFoundException('Flow not found');
+    const flow = await this.findOne(id, orgId);
     await this.sessionModel.deleteMany({ flow: flow._id });
     await flow.deleteOne();
   }
