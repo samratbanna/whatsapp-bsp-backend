@@ -45,11 +45,13 @@ export class FlowExecutor {
     this.logger.log(`FlowExecutor: matched flow "${flow.name}" (${flow._id})`);
 
     // 3. Start new session
+    this.logger.log(`FlowExecutor: flow nodes = ${JSON.stringify(flow.nodes.map(n => ({ id: n.id, type: n.type, next: n.next })))}`);
     const triggerNode = flow.nodes.find((n) => n.type === NodeType.TRIGGER);
     if (!triggerNode) {
       this.logger.warn(`FlowExecutor: flow "${flow.name}" has no TRIGGER node — skipping`);
       return;
     }
+    this.logger.log(`FlowExecutor: triggerNode.next="${triggerNode.next}"`);
 
     session = await this.sessionModel.create({
       organization: new Types.ObjectId(orgId),
@@ -72,11 +74,14 @@ export class FlowExecutor {
     wabaDbId: string,
   ): Promise<void> {
     const flow = session.flow as unknown as FlowDocument;
+    this.logger.log(`continueFlow: sessionId=${session._id} currentNodeId=${session.currentNodeId} flowNodes=${flow?.nodes?.length ?? 'N/A'}`);
     const currentNode = flow.nodes.find((n) => n.id === session.currentNodeId);
     if (!currentNode) {
+      this.logger.warn(`continueFlow: node "${session.currentNodeId}" not found in flow — ending session`);
       await this.endSession(session);
       return;
     }
+    this.logger.log(`continueFlow: currentNode type=${currentNode.type}`);
 
     if (currentNode.type === NodeType.ASK_QUESTION) {
       const varName = currentNode.data.variableName || 'last_input';
@@ -109,18 +114,32 @@ export class FlowExecutor {
     orgId: string,
     wabaDbId: string,
   ): Promise<void> {
-    const waba = await this.wabaService.findOne(wabaDbId, orgId);
+    this.logger.log(`executeFromNode: wabaDbId=${wabaDbId} orgId=${orgId} startNode=${session.currentNodeId}`);
+    let waba: any;
+    try {
+      waba = await this.wabaService.findOne(wabaDbId, orgId);
+      this.logger.log(`executeFromNode: waba found phoneNumberId=${waba.phoneNumberId}`);
+    } catch (err: any) {
+      this.logger.error(`executeFromNode: WABA lookup failed — ${err?.message ?? err}`);
+      return;
+    }
+
     let nodeId = session.currentNodeId;
     const maxSteps = 20; // prevent infinite loops
     let steps = 0;
 
     while (nodeId && steps < maxSteps) {
       const node = flow.nodes.find((n) => n.id === nodeId);
-      if (!node) break;
+      if (!node) {
+        this.logger.warn(`executeFromNode: node "${nodeId}" not found in flow — stopping`);
+        break;
+      }
       steps++;
+      this.logger.log(`executeFromNode: step=${steps} nodeId=${nodeId} type=${node.type}`);
 
       try {
         const result = await this.executeNode(node, session, waba, message);
+        this.logger.log(`executeFromNode: node ${node.type} result="${result}"`);
 
         if (result === 'end' || node.type === NodeType.END) {
           await this.endSession(session);
