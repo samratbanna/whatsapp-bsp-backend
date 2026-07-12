@@ -30,6 +30,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { PricingModule } from './modules/pricing/pricing.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
+import { AiAgentsModule } from './modules/ai-agents/ai-agents.module';
 
 @Module({
   imports: [
@@ -93,6 +94,9 @@ import { ConversationsModule } from './modules/conversations/conversations.modul
     WalletModule,
     PricingModule,
     ConversationsModule,
+
+    // AI
+    AiAgentsModule,
   ],
 })
 export class AppModule {}
