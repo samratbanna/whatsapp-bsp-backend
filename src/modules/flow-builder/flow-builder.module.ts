@@ -1,10 +1,11 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Flow, FlowSchema, FlowSession, FlowSessionSchema, FlowCompletion, FlowCompletionSchema, FlowLog, FlowLogSchema } from './schemas/flow.schema';
 import { FlowBuilderService } from './flow-builder.service';
 import { FlowBuilderController } from './flow-builder.controller';
 import { FlowExecutor } from './executors/flow.executor';
 import { WabaModule } from '../waba/waba.module';
+import { AiAgentsModule } from '../ai-agents/ai-agents.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { WabaModule } from '../waba/waba.module';
       { name: FlowLog.name, schema: FlowLogSchema },
     ]),
     WabaModule,
+    forwardRef(() => AiAgentsModule),
   ],
   controllers: [FlowBuilderController],
   providers: [FlowBuilderService, FlowExecutor],

@@ -7,7 +7,7 @@ import { FlowExecutor } from '../flow-builder/executors/flow.executor';
 import { InboxGateway } from '../inbox/gateways/inbox.gateway';
 import { ConversationsService } from '../conversations/conversations.service';
 import { ConversationOrigin } from '../conversations/schemas/conversation.schema';
-import { log } from 'console';
+import { AiReplyService } from '../ai-agents/ai-reply.service';
 
 @Injectable()
 export class WebhookService {
@@ -21,6 +21,7 @@ export class WebhookService {
     @Optional() private flowExecutor?: FlowExecutor,
     @Optional() private inboxGateway?: InboxGateway,
     @Optional() private conversationsService?: ConversationsService,
+    @Optional() private aiReplyService?: AiReplyService,
   ) {}
 
   verifyToken(token: string): boolean {
@@ -128,11 +129,43 @@ export class WebhookService {
         // Auto mark as read
         await this.metaApi.markAsRead(phoneNumberId, waba.accessToken, message.id);
 
-        // Run through flow executor
-        if (this.flowExecutor) {
-          this.flowExecutor
-            .processInbound(orgId, wabaDbId, message)
-            .catch((err) => this.logger.error(`Flow executor error: ${err.message}`));
+        // Only text messages go through flow/AI — skip non-text (image, audio, etc.)
+        const isTextMessage = !!message.text?.body;
+
+        // Run through flow executor first; if no flow handled it, try AI
+        let flowHandled = false;
+        if (this.flowExecutor && isTextMessage) {
+          try {
+            flowHandled = await this.flowExecutor.processInbound(orgId, wabaDbId, message);
+          } catch (err: any) {
+            this.logger.error(`Flow executor error: ${err.message}`);
+          }
+        }
+
+        // If no active flow, let AI reply service handle (fire-and-forget)
+        if (!flowHandled && isTextMessage && this.aiReplyService) {
+          this.aiReplyService
+            .processMessage({
+              phone: message.from,
+              text: message.text.body,
+              orgId,
+              wabaId: wabaDbId,
+            })
+            .then(async (result) => {
+              if (!result?.reply) return;
+              // Send the AI reply back via WhatsApp
+              try {
+                await this.metaApi.sendMessage(
+                  phoneNumberId,
+                  waba.accessToken,
+                  { to: message.from, type: 'text', text: { body: result.reply } },
+                );
+                this.logger.log(`AI reply sent to ${message.from} (handoff=${result.handoff})`);
+              } catch (sendErr: any) {
+                this.logger.error(`Failed to send AI reply: ${sendErr.message}`);
+              }
+            })
+            .catch((err: any) => this.logger.error(`AI reply error: ${err.message}`));
         }
       } catch (err) {
         this.logger.error(`Error storing inbound: ${err.message}`);

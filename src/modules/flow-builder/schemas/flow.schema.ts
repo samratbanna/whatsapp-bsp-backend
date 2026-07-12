@@ -25,6 +25,7 @@ export enum NodeType {
   RESET_FLOW = 'reset_flow',
   ASK_QUESTION = 'ask_question',
   QUICK_REPLY = 'quick_reply',
+  AI_AGENT = 'ai_agent',       // hand off to an AI agent for conversation
 }
 
 @Schema({ timestamps: true })
