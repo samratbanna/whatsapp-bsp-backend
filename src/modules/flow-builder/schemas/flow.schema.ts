@@ -80,6 +80,14 @@ export class Flow {
   // Priority when multiple flows match
   @Prop({ default: 0 })
   priority: number;
+
+  // Repeat policy — how many times can this flow run per contact
+  @Prop({ enum: ['once', 'cooldown', 'always'], default: 'once' })
+  repeatPolicy: 'once' | 'cooldown' | 'always';
+
+  // Only used when repeatPolicy = 'cooldown' — number of days before flow can repeat
+  @Prop({ default: 0 })
+  cooldownDays: number;
 }
 
 export const FlowSchema = SchemaFactory.createForClass(Flow);
@@ -117,3 +125,65 @@ export class FlowSession {
 export const FlowSessionSchema = SchemaFactory.createForClass(FlowSession);
 FlowSessionSchema.index({ organization: 1, phone: 1 });
 FlowSessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
+// ── Flow Completion — tracks per-contact flow completions for repeat policy ──
+
+export type FlowCompletionDocument = FlowCompletion & Document;
+
+@Schema({ timestamps: true })
+export class FlowCompletion {
+  @Prop({ type: Types.ObjectId, ref: 'Organization', required: true })
+  organization: Types.ObjectId;
+
+  @Prop({ required: true })
+  phone: string;
+
+  @Prop({ type: Types.ObjectId, ref: 'Flow', required: true })
+  flow: Types.ObjectId;
+
+  // TTL field — set far future for 'once', or completedAt + cooldownDays for 'cooldown'
+  @Prop({ type: Date, required: true })
+  expiresAt: Date;
+}
+
+export const FlowCompletionSchema = SchemaFactory.createForClass(FlowCompletion);
+FlowCompletionSchema.index({ organization: 1, phone: 1, flow: 1 });
+FlowCompletionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
+// ── Flow Log — per-interaction conversation record ────────────────────────────
+
+export type FlowLogDocument = FlowLog & Document;
+
+@Schema({ timestamps: true })
+export class FlowLog {
+  @Prop({ type: Types.ObjectId, ref: 'Organization', required: true, index: true })
+  organization: Types.ObjectId;
+
+  @Prop({ required: true })
+  phone: string;
+
+  @Prop({ type: Types.ObjectId, ref: 'Flow', required: true })
+  flow: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'FlowSession', required: true })
+  session: Types.ObjectId;
+
+  @Prop({ required: true })
+  nodeType: string;
+
+  @Prop()
+  nodeLabel?: string;
+
+  @Prop()
+  sent?: string;      // bot ka message
+
+  @Prop()
+  received?: string;  // user ka reply
+
+  @Prop({ type: Date, default: () => new Date() })
+  timestamp: Date;
+}
+
+export const FlowLogSchema = SchemaFactory.createForClass(FlowLog);
+FlowLogSchema.index({ organization: 1, flow: 1, session: 1 });
+FlowLogSchema.index({ organization: 1, phone: 1 });

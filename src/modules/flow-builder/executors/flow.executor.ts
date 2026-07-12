@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import axios from 'axios';
-import { Flow, FlowDocument, FlowSession, FlowSessionDocument, NodeType } from '../schemas/flow.schema';
+import { Flow, FlowDocument, FlowSession, FlowSessionDocument, FlowCompletion, FlowCompletionDocument, FlowLog, FlowLogDocument, NodeType } from '../schemas/flow.schema';
 import { MetaApiService } from '../../../common/services/meta-api.service';
 import { WabaService } from '../../waba/waba.service';
 
@@ -13,6 +13,8 @@ export class FlowExecutor {
   constructor(
     @InjectModel(Flow.name) private flowModel: Model<FlowDocument>,
     @InjectModel(FlowSession.name) private sessionModel: Model<FlowSessionDocument>,
+    @InjectModel(FlowCompletion.name) private completionModel: Model<FlowCompletionDocument>,
+    @InjectModel(FlowLog.name) private logModel: Model<FlowLogDocument>,
     private metaApi: MetaApiService,
     private wabaService: WabaService,
   ) {}
@@ -44,7 +46,21 @@ export class FlowExecutor {
     }
     this.logger.log(`FlowExecutor: matched flow "${flow.name}" (${flow._id})`);
 
-    // 3. Start new session
+    // 3. Repeat policy check
+    const policy = (flow as any).repeatPolicy || 'always';
+    if (policy !== 'always') {
+      const existing = await this.completionModel.findOne({
+        organization: new Types.ObjectId(orgId),
+        phone,
+        flow: flow._id,
+      });
+      if (existing) {
+        this.logger.log(`FlowExecutor: repeat blocked (policy=${policy}) for phone=${phone} flow="${flow.name}"`);
+        return;
+      }
+    }
+
+    // 4. Start new session
     this.logger.log(`FlowExecutor: flow nodes = ${JSON.stringify(flow.nodes.map(n => ({ id: n.id, type: n.type, next: n.next })))}`);
     const triggerNode = flow.nodes.find((n) => n.type === NodeType.TRIGGER);
     if (!triggerNode) {
@@ -84,23 +100,28 @@ export class FlowExecutor {
     this.logger.log(`continueFlow: currentNode type=${currentNode.type}`);
 
     if (currentNode.type === NodeType.ASK_QUESTION) {
+      const received = message.text?.body || '';
       const varName = currentNode.data.variableName || 'last_input';
-      session.variables[varName] = message.text?.body || '';
+      session.variables[varName] = received;
       session.currentNodeId = currentNode.next || '';
       await session.save();
+      await this.addLog(session, { nodeType: currentNode.type, nodeLabel: currentNode.label, received });
     } else if (currentNode.type === NodeType.QUICK_REPLY) {
       const buttonId = message.interactive?.button_reply?.id || message.text?.body || '';
+      const received = message.interactive?.button_reply?.title || buttonId;
       const matched = (currentNode.data.buttons || []).find((b: any) => b.id === buttonId);
       if (currentNode.data.variableName) {
-        session.variables[currentNode.data.variableName] =
-          message.interactive?.button_reply?.title || buttonId;
+        session.variables[currentNode.data.variableName] = received;
       }
       session.currentNodeId = matched?.next || currentNode.next || '';
       await session.save();
+      await this.addLog(session, { nodeType: currentNode.type, nodeLabel: currentNode.label, received });
     } else if (currentNode.data?.captureInput) {
+      const received = message.text?.body || '';
       const varName = currentNode.data.variableName || 'last_input';
-      session.variables[varName] = message.text?.body || '';
+      session.variables[varName] = received;
       await session.save();
+      await this.addLog(session, { nodeType: currentNode.type, nodeLabel: currentNode.label, received });
     }
 
     await this.executeFromNode(session, flow, message, orgId, wabaDbId);
@@ -142,7 +163,7 @@ export class FlowExecutor {
         this.logger.log(`executeFromNode: node ${node.type} result="${result}"`);
 
         if (result === 'end' || node.type === NodeType.END) {
-          await this.endSession(session);
+          await this.endSession(session, flow);
           await this.flowModel.findByIdAndUpdate(flow._id, { $inc: { completionCount: 1 } });
           break;
         }
@@ -186,16 +207,13 @@ export class FlowExecutor {
         await this.metaApi.sendMessageAutoRefresh(
           waba.phoneNumberId,
           waba.accessToken,
-          {
-            to: session.phone,
-            type: 'text',
-            text: { body: text },
-          },
+          { to: session.phone, type: 'text', text: { body: text } },
           async (newToken) => {
             waba.accessToken = newToken;
             await this.wabaService.updateAccessToken(waba._id.toString(), newToken);
           },
         );
+        await this.addLog(session, { nodeType: node.type, nodeLabel: node.label, sent: text });
         return node.next || 'end';
       }
 
@@ -293,6 +311,7 @@ export class FlowExecutor {
             await this.wabaService.updateAccessToken(waba._id.toString(), newToken);
           },
         );
+        await this.addLog(session, { nodeType: node.type, nodeLabel: node.label, sent: question });
         return 'wait';
       }
 
@@ -308,17 +327,15 @@ export class FlowExecutor {
           {
             to: session.phone,
             type: 'interactive',
-            interactive: {
-              type: 'button',
-              body: { text: body },
-              action: { buttons },
-            },
+            interactive: { type: 'button', body: { text: body }, action: { buttons } },
           },
           async (newToken) => {
             waba.accessToken = newToken;
             await this.wabaService.updateAccessToken(waba._id.toString(), newToken);
           },
         );
+        const buttonTitles = (node.data.buttons as any[] || []).map((b) => b.title).join(' / ');
+        await this.addLog(session, { nodeType: node.type, nodeLabel: node.label, sent: `${body} [${buttonTitles}]` });
         return 'wait';
       }
 
@@ -362,9 +379,47 @@ export class FlowExecutor {
     return null;
   }
 
-  private async endSession(session: FlowSessionDocument): Promise<void> {
+  private async addLog(
+    session: FlowSessionDocument,
+    entry: { nodeType: string; nodeLabel?: string; sent?: string; received?: string },
+  ): Promise<void> {
+    try {
+      await this.logModel.create({
+        organization: session.organization,
+        phone: session.phone,
+        flow: session.flow,
+        session: session._id,
+        nodeType: entry.nodeType,
+        nodeLabel: entry.nodeLabel,
+        sent: entry.sent,
+        received: entry.received,
+        timestamp: new Date(),
+      });
+    } catch (err: any) {
+      this.logger.warn(`addLog failed: ${err?.message}`);
+    }
+  }
+
+  private async endSession(session: FlowSessionDocument, flow?: FlowDocument): Promise<void> {
     session.isActive = false;
     await session.save();
+
+    if (!flow) return;
+    const policy = (flow as any).repeatPolicy || 'always';
+    if (policy === 'always') return;
+
+    const cooldownDays = (flow as any).cooldownDays || 0;
+    // 'once' → never expires (year 9999); 'cooldown' → expires after cooldownDays
+    const expiresAt = policy === 'once'
+      ? new Date('9999-12-31')
+      : new Date(Date.now() + cooldownDays * 24 * 60 * 60 * 1000);
+
+    await this.completionModel.updateOne(
+      { organization: session.organization, phone: session.phone, flow: flow._id },
+      { $set: { expiresAt } },
+      { upsert: true },
+    );
+    this.logger.log(`FlowExecutor: completion recorded policy=${policy} phone=${session.phone} expiresAt=${expiresAt.toISOString()}`);
   }
 
   private interpolate(template: string, vars: Record<string, string>): string {

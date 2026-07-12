@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Flow, FlowDocument, FlowSession, FlowSessionDocument, FlowStatus } from './schemas/flow.schema';
+import { Flow, FlowDocument, FlowSession, FlowSessionDocument, FlowLog, FlowLogDocument, FlowStatus } from './schemas/flow.schema';
 import { CreateFlowDto, UpdateFlowDto } from './dto/flow.dto';
 import { WabaService } from '../waba/waba.service';
 
@@ -10,6 +10,7 @@ export class FlowBuilderService {
   constructor(
     @InjectModel(Flow.name) private flowModel: Model<FlowDocument>,
     @InjectModel(FlowSession.name) private sessionModel: Model<FlowSessionDocument>,
+    @InjectModel(FlowLog.name) private logModel: Model<FlowLogDocument>,
     private wabaService: WabaService,
   ) {}
 
@@ -98,5 +99,66 @@ export class FlowBuilderService {
       { $set: { isActive: false } },
     );
     return { cleared: result.modifiedCount };
+  }
+
+  // ── Flow Dashboard ────────────────────────────────────────────────
+
+  async getFlowSessions(
+    flowId: string,
+    orgId: string,
+    page = 1,
+    limit = 20,
+  ) {
+    const filter = {
+      organization: new Types.ObjectId(orgId),
+      flow: new Types.ObjectId(flowId),
+    };
+    const [sessions, total] = await Promise.all([
+      this.sessionModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .select('-__v')
+        .exec(),
+      this.sessionModel.countDocuments(filter),
+    ]);
+    return { sessions, total, page, limit, pages: Math.ceil(total / limit) };
+  }
+
+  async getSessionLogs(sessionId: string, orgId: string) {
+    const session = await this.sessionModel
+      .findOne({ _id: sessionId, organization: new Types.ObjectId(orgId) })
+      .select('-__v')
+      .exec();
+    if (!session) throw new NotFoundException('Session not found');
+
+    const logs = await this.logModel
+      .find({ session: new Types.ObjectId(sessionId) })
+      .sort({ timestamp: 1 })
+      .select('-__v')
+      .exec();
+
+    return { session, logs };
+  }
+
+  async getFlowStats(flowId: string, orgId: string) {
+    const flow = await this.findOne(flowId, orgId);
+    const filter = { organization: new Types.ObjectId(orgId), flow: new Types.ObjectId(flowId) };
+
+    const [total, active, completed] = await Promise.all([
+      this.sessionModel.countDocuments(filter),
+      this.sessionModel.countDocuments({ ...filter, isActive: true }),
+      this.sessionModel.countDocuments({ ...filter, isActive: false }),
+    ]);
+
+    return {
+      flowId,
+      name: flow.name,
+      status: flow.status,
+      triggerCount: flow.triggerCount,
+      completionCount: flow.completionCount,
+      sessions: { total, active, completed },
+    };
   }
 }

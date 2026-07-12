@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Put, Delete, Patch,
-  Body, Param, Query, UseGuards,
+  Body, Param, Query, UseGuards, ParseIntPipe, DefaultValuePipe,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -70,5 +70,30 @@ export class FlowBuilderController {
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser('orgId') orgId: string) {
     return this.flowService.remove(id, orgId);
+  }
+
+  // ── Dashboard ─────────────────────────────────────────────────────
+
+  @Get(':id/stats')
+  getFlowStats(@Param('id') id: string, @CurrentUser('orgId') orgId: string) {
+    return this.flowService.getFlowStats(id, orgId);
+  }
+
+  @Get(':id/sessions')
+  getFlowSessions(
+    @Param('id') id: string,
+    @CurrentUser('orgId') orgId: string,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+  ) {
+    return this.flowService.getFlowSessions(id, orgId, page, limit);
+  }
+
+  @Get(':id/sessions/:sessionId')
+  getSessionLogs(
+    @Param('sessionId') sessionId: string,
+    @CurrentUser('orgId') orgId: string,
+  ) {
+    return this.flowService.getSessionLogs(sessionId, orgId);
   }
 }
