@@ -326,20 +326,26 @@ export class AiReplyService {
     outputTokens?: number;
     agentUsed: { name: string; provider: string; model: string };
     knowledgeUsed: number;
+    totalChunksIndexed: number;
     systemPromptPreview: string;
+    noKnowledgeWarning: boolean;
   }> {
     const start = Date.now();
 
     const agent = await this.agentsService.findOneWithKey(agentId);
     if (!agent) throw new Error('Agent not found');
 
-    // Vector search (no usage tracking for test)
+    // In test mode: use threshold=0 to surface any matches regardless of score,
+    // so the tester can see what knowledge exists even if scores are low.
     const chunks = await this.vectorSearch.search(
       message,
       agentId,
       5,
-      agent.confidenceThreshold ?? 0.65,
+      0,
     );
+
+    // Also get total indexed chunk count for diagnostics
+    const { totalChunks: totalChunksIndexed } = await this.vectorSearch.getChunkStats(agentId);
 
     // Build system prompt (same logic as real replies)
     let systemContent = agent.systemPrompt ?? 'You are a helpful assistant.';
@@ -358,25 +364,24 @@ export class AiReplyService {
       { role: 'user', content: message },
     ];
 
-    let reply = agent.cantAnswerMessage ?? "I don't have information on that.";
+    // In test mode: ALWAYS call AI — show exactly what the agent would say.
+    let reply: string;
     let inputTokens: number | undefined;
     let outputTokens: number | undefined;
 
-    if (chunks.length > 0 || !agent.cantAnswerMessage) {
-      try {
-        const response = await this.aiProvider.chat(
-          aiMessages,
-          agent.provider,
-          agent.model,
-          (agent as any).apiKey,
-          { temperature: agent.temperature, maxTokens: agent.maxTokens },
-        );
-        reply = response.text;
-        inputTokens = response.inputTokens;
-        outputTokens = response.outputTokens;
-      } catch (err: any) {
-        reply = `[AI Error: ${err?.message}]`;
-      }
+    try {
+      const response = await this.aiProvider.chat(
+        aiMessages,
+        agent.provider,
+        agent.model,
+        (agent as any).apiKey,
+        { temperature: agent.temperature, maxTokens: agent.maxTokens },
+      );
+      reply = response.text;
+      inputTokens = response.inputTokens;
+      outputTokens = response.outputTokens;
+    } catch (err: any) {
+      reply = `[AI Error: ${err?.message}]`;
     }
 
     return {
@@ -393,7 +398,9 @@ export class AiReplyService {
       outputTokens,
       agentUsed: { name: agent.name, provider: agent.provider, model: agent.model },
       knowledgeUsed: chunks.length,
+      totalChunksIndexed,
       systemPromptPreview: systemContent.slice(0, 500) + (systemContent.length > 500 ? '...' : ''),
+      noKnowledgeWarning: totalChunksIndexed === 0,
     };
   }
 

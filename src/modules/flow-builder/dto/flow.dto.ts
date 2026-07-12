@@ -1,6 +1,6 @@
 import {
   IsString, IsEnum, IsOptional, IsArray,
-  IsObject, IsNumber, IsBoolean, ValidateNested,
+  IsObject, IsNumber, IsBoolean, ValidateNested, IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
@@ -9,7 +9,7 @@ import { FlowStatus } from '../schemas/flow.schema';
 export class FlowTriggerDto {
   @ApiProperty({ enum: ['keyword', 'any_message', 'opt_in', 'button_reply'] })
   @IsString()
-  type: string;
+  type!: string;
 
   @ApiPropertyOptional({ type: [String] })
   @IsArray()
@@ -26,11 +26,11 @@ export class FlowTriggerDto {
 export class FlowNodeDto {
   @ApiProperty()
   @IsString()
-  id: string;
+  id!: string;
 
   @ApiProperty()
   @IsString()
-  type: string;
+  type!: string;
 
   @ApiPropertyOptional()
   @IsString()
@@ -42,9 +42,10 @@ export class FlowNodeDto {
   @IsOptional()
   position?: { x: number; y: number };
 
-  @ApiProperty({ type: Object })
+  @ApiPropertyOptional({ type: Object })
   @IsObject()
-  data: Record<string, any>;
+  @IsOptional()
+  data?: Record<string, any>;
 
   @ApiPropertyOptional()
   @IsString()
@@ -55,33 +56,72 @@ export class FlowNodeDto {
   @IsArray()
   @IsOptional()
   branches?: { condition: string; next: string }[];
+
+  // ReactFlow canvas metadata — stored for UI restore, ignored by executor
+  @IsNumber()
+  @IsOptional()
+  width?: number;
+
+  @IsNumber()
+  @IsOptional()
+  height?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  selected?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  dragging?: boolean;
+
+  @IsObject()
+  @IsOptional()
+  positionAbsolute?: { x: number; y: number };
 }
 
 export class CreateFlowDto {
   @ApiProperty({ example: 'Welcome Bot' })
   @IsString()
-  name: string;
+  name!: string;
 
   @ApiPropertyOptional()
   @IsString()
   @IsOptional()
   description?: string;
 
-  @ApiProperty({ type: FlowTriggerDto })
+  @ApiPropertyOptional({ type: FlowTriggerDto })
   @ValidateNested()
   @Type(() => FlowTriggerDto)
-  trigger: FlowTriggerDto;
+  @IsOptional()
+  trigger?: FlowTriggerDto;
 
-  @ApiProperty({ type: [FlowNodeDto] })
+  @ApiPropertyOptional({ type: [FlowNodeDto] })
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => FlowNodeDto)
-  nodes: FlowNodeDto[];
+  @IsOptional()
+  nodes?: FlowNodeDto[];
+
+  // ReactFlow edges — stored for canvas restore, not used by flow executor
+  @ApiPropertyOptional({ type: [Object] })
+  @IsArray()
+  @IsOptional()
+  edges?: Record<string, any>[];
 
   @ApiPropertyOptional({ default: 0 })
   @IsNumber()
   @IsOptional()
   priority?: number;
+
+  @ApiPropertyOptional({ enum: ['once', 'cooldown', 'always'], default: 'once' })
+  @IsIn(['once', 'cooldown', 'always'])
+  @IsOptional()
+  repeatPolicy?: 'once' | 'cooldown' | 'always';
+
+  @ApiPropertyOptional({ default: 0 })
+  @IsNumber()
+  @IsOptional()
+  cooldownDays?: number;
 
   @ApiPropertyOptional()
   @IsString()

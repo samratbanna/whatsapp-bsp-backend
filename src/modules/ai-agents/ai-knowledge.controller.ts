@@ -34,6 +34,22 @@ export class AiKnowledgeController {
     return this.knowledgeService.getStats(agentId, orgId);
   }
 
+  // ── Vector search (test endpoint) ───────────────────────────────────────
+  @Get('search')
+  search(
+    @Param('agentId') agentId: string,
+    @Query('q') query: string,
+    @Query('topK') topK: string,
+  ) {
+    return this.vectorSearch.search(query, agentId, topK ? Number(topK) : 5, 0);
+  }
+
+  // ── Chunk stats ─────────────────────────────────────────────────────────
+  @Get('chunk-stats')
+  chunkStats(@Param('agentId') agentId: string) {
+    return this.vectorSearch.getChunkStats(agentId);
+  }
+
   @Get(':id')
   findOne(@Param('agentId') agentId: string, @Param('id') id: string, @CurrentUser('orgId') orgId: string) {
     return this.knowledgeService.findOne(id, orgId);
@@ -148,26 +164,9 @@ export class AiKnowledgeController {
     return this.knowledgeService.remove(id, orgId);
   }
 
-  // ── Vector search (test endpoint) ───────────────────────────────────────
-  @Get('search')
-  search(
-    @Param('agentId') agentId: string,
-    @Query('q') query: string,
-    @Query('topK') topK: string,
-    @CurrentUser('orgId') orgId: string,
-  ) {
-    return this.vectorSearch.search(query, agentId, topK ? Number(topK) : 5);
-  }
-
   // ── Rebuild all chunks for an agent ────────────────────────────────────
   @Post('rebuild-index')
   rebuildIndex(@Param('agentId') agentId: string) {
     return this.vectorSearch.rebuildAllForAgent(agentId);
-  }
-
-  // ── Chunk stats ─────────────────────────────────────────────────────────
-  @Get('chunk-stats')
-  chunkStats(@Param('agentId') agentId: string) {
-    return this.vectorSearch.getChunkStats(agentId);
   }
 }

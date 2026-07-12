@@ -26,8 +26,11 @@ export class FlowBuilderService {
       name: dto.name,
       description: dto.description,
       trigger: dto.trigger as any,
-      nodes: dto.nodes as any[],
+      nodes: dto.nodes as any[] || [],
+      edges: dto.edges as any[] || [],
       priority: dto.priority || 0,
+      repeatPolicy: dto.repeatPolicy || 'once',
+      cooldownDays: dto.cooldownDays || 0,
       status: 'draft',
     });
   }

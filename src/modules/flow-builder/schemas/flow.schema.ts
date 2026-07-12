@@ -56,6 +56,10 @@ export class Flow {
     caseSensitive?: boolean;
   };
 
+  // ReactFlow edges — stored for canvas restore only, not used by executor
+  @Prop({ type: [Object], default: [] })
+  edges: Record<string, any>[];
+
   // Nodes array — full graph
   @Prop({ type: [Object], default: [] })
   nodes: {
