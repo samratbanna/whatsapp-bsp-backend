@@ -10,6 +10,7 @@ import {
   Template,
   TemplateDocument,
   TemplateStatus,
+  TemplateCategory,
 } from './schemas/template.schema';
 import { CreateTemplateDto, UpdateTemplateDto, TemplateQueryDto } from './dto/template.dto';
 import { WabaService } from '../waba/waba.service';
@@ -62,6 +63,114 @@ export class TemplatesService {
     return Array.from(vars);
   }
 
+  // Returns the distinct {{n}} numbers found in a text, sorted ascending.
+  private getVariableNumbers(text?: string): number[] {
+    if (!text) return [];
+    const regex = /\{\{(\d+)\}\}/g;
+    const nums = new Set<number>();
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(text)) !== null) {
+      nums.add(parseInt(match[1], 10));
+    }
+    return Array.from(nums).sort((a, b) => a - b);
+  }
+
+  // Meta rejects templates whose {{n}} numbering skips a value (e.g. {{1}},{{3}})
+  // with a generic "invalid format" error — catch it here with a clear message.
+  private validateSequentialVariables(nums: number[], componentLabel: string) {
+    for (let i = 0; i < nums.length; i++) {
+      if (nums[i] !== i + 1) {
+        throw new BadRequestException(
+          `${componentLabel} variables must be numbered sequentially starting at {{1}} (e.g. {{1}}, {{2}}, {{3}}). ` +
+          `Found {{${nums.join('}}, {{')}}}} — Meta rejects skipped numbers as an invalid format.`,
+        );
+      }
+    }
+  }
+
+  // Builds the exact components array Meta expects, including auto-generated
+  // `example` values for any {{n}} placeholder that the caller didn't supply
+  // one for (Meta rejects a template with placeholders but no example as
+  // "invalid format"). AUTHENTICATION templates get Meta's fixed structure —
+  // Meta auto-generates the OTP body, so free-text/{{n}} placeholders are
+  // never valid there and are ignored.
+  private buildMetaComponents(category: string | undefined, components: any[]): any[] {
+    if ((category || '').toUpperCase() === TemplateCategory.AUTHENTICATION) {
+      return [
+        { type: 'BODY', add_security_recommendation: true },
+        { type: 'FOOTER', code_expiration_minutes: 10 },
+        { type: 'BUTTONS', buttons: [{ type: 'OTP', otp_type: 'COPY_CODE' }] },
+      ];
+    }
+
+    const metaComponents: any[] = [];
+    for (const comp of components) {
+      const type = (comp.type || '').toUpperCase();
+
+      if (type === 'HEADER') {
+        if (comp.format && comp.format !== 'TEXT' && comp.mediaId) {
+          // Media header — split "uploadHandle|||standardId" written by uploadMedia
+          let handle = comp.mediaId;
+          let standardId = comp.mediaId;
+          if (comp.mediaId.includes('|||')) {
+            [handle, standardId] = comp.mediaId.split('|||');
+            (comp as any).mediaId = standardId; // persist standard ID to DB
+          }
+          metaComponents.push({
+            type: 'HEADER',
+            format: comp.format,
+            example: { header_handle: [handle] },
+          });
+        } else {
+          // Text header
+          const headerVars = this.getVariableNumbers(comp.text);
+          if (headerVars.length) {
+            this.validateSequentialVariables(headerVars, 'HEADER');
+            if (headerVars.length > 1) {
+              throw new BadRequestException(
+                'HEADER text can contain only one variable, e.g. {{1}} — Meta does not support multiple header variables.',
+              );
+            }
+            const provided = comp.example?.header_text?.[0];
+            (comp as any).example = { header_text: [provided || 'Sample'] };
+          }
+          const headerComp: any = { type: 'HEADER', format: comp.format || 'TEXT' };
+          if (comp.text) headerComp.text = comp.text;
+          if (comp.example) headerComp.example = comp.example;
+          metaComponents.push(headerComp);
+        }
+      } else if (type === 'BODY') {
+        const bodyVars = this.getVariableNumbers(comp.text);
+        if (bodyVars.length) {
+          this.validateSequentialVariables(bodyVars, 'BODY');
+          const provided = comp.example?.body_text?.[0];
+          const sampleValues =
+            provided && provided.length === bodyVars.length
+              ? provided
+              : bodyVars.map((n: number) => `Sample${n}`);
+          (comp as any).example = { body_text: [sampleValues] };
+        }
+        const bodyComp: any = { type: 'BODY', text: comp.text };
+        if (comp.example) bodyComp.example = comp.example;
+        metaComponents.push(bodyComp);
+      } else if (type === 'FOOTER') {
+        if (this.getVariableNumbers(comp.text).length) {
+          throw new BadRequestException('FOOTER text cannot contain variables like {{1}} — Meta does not support them.');
+        }
+        metaComponents.push({ type: 'FOOTER', text: comp.text });
+      } else if (type === 'BUTTONS') {
+        const buttons = (comp.buttons || []).map((btn) => {
+          const b: any = { type: btn.type, text: btn.text };
+          if (btn.url) b.url = btn.url;
+          if (btn.phone_number) b.phone_number = btn.phone_number;
+          return b;
+        });
+        metaComponents.push({ type: 'BUTTONS', buttons });
+      }
+    }
+    return metaComponents;
+  }
+
   // ── Create + submit to Meta ────────────────────────────────────────
   async create(
     orgId: string,
@@ -82,47 +191,7 @@ export class TemplatesService {
       throw new BadRequestException('Template with this name already exists');
 
     // Build clean per-type components for the Meta API (no undefined fields)
-    const metaComponents: any[] = [];
-    for (const comp of dto.components) {
-      const type = (comp.type || '').toUpperCase();
-
-      if (type === 'HEADER') {
-        if (comp.format && comp.format !== 'TEXT' && comp.mediaId) {
-          // Media header — split "uploadHandle|||standardId" written by uploadMedia
-          let handle = comp.mediaId;
-          let standardId = comp.mediaId;
-          if (comp.mediaId.includes('|||')) {
-            [handle, standardId] = comp.mediaId.split('|||');
-            (comp as any).mediaId = standardId; // persist standard ID to DB
-          }
-          metaComponents.push({
-            type: 'HEADER',
-            format: comp.format,
-            example: { header_handle: [handle] },
-          });
-        } else {
-          // Text header
-          const headerComp: any = { type: 'HEADER', format: comp.format || 'TEXT' };
-          if (comp.text) headerComp.text = comp.text;
-          if (comp.example) headerComp.example = comp.example;
-          metaComponents.push(headerComp);
-        }
-      } else if (type === 'BODY') {
-        const bodyComp: any = { type: 'BODY', text: comp.text };
-        if (comp.example) bodyComp.example = comp.example;
-        metaComponents.push(bodyComp);
-      } else if (type === 'FOOTER') {
-        metaComponents.push({ type: 'FOOTER', text: comp.text });
-      } else if (type === 'BUTTONS') {
-        const buttons = (comp.buttons || []).map((btn) => {
-          const b: any = { type: btn.type, text: btn.text };
-          if (btn.url) b.url = btn.url;
-          if (btn.phone_number) b.phone_number = btn.phone_number;
-          return b;
-        });
-        metaComponents.push({ type: 'BUTTONS', buttons });
-      }
-    }
+    const metaComponents = this.buildMetaComponents(dto.category, dto.components);
     this.logger.debug(`Meta components: ${JSON.stringify(metaComponents)}`);
 
     // Submit to Meta
@@ -151,8 +220,13 @@ export class TemplatesService {
       name: dto.name,
       category: dto.category,
       language: dto.language,
-      components: dto.components as any[],
-      variables: this.extractVariables(dto.components),
+      components: (dto.category === TemplateCategory.AUTHENTICATION
+        ? metaComponents
+        : dto.components) as any[],
+      variables:
+        dto.category === TemplateCategory.AUTHENTICATION
+          ? []
+          : this.extractVariables(dto.components),
       status: TemplateStatus.PENDING,
     });
   }
@@ -321,40 +395,7 @@ export class TemplatesService {
     const waba = await this.wabaService.findOne(wabaId);
 
     // Build Meta-compatible components (same logic as create)
-    const metaComponents: any[] = [];
-    for (const comp of dto.components) {
-      const type = (comp.type || '').toUpperCase();
-      if (type === 'HEADER') {
-        if (comp.format && comp.format !== 'TEXT' && comp.mediaId) {
-          let handle = comp.mediaId;
-          let standardId = comp.mediaId;
-          if (comp.mediaId.includes('|||')) {
-            [handle, standardId] = comp.mediaId.split('|||');
-            (comp as any).mediaId = standardId;
-          }
-          metaComponents.push({ type: 'HEADER', format: comp.format, example: { header_handle: [handle] } });
-        } else {
-          const headerComp: any = { type: 'HEADER', format: comp.format || 'TEXT' };
-          if (comp.text) headerComp.text = comp.text;
-          if (comp.example) headerComp.example = comp.example;
-          metaComponents.push(headerComp);
-        }
-      } else if (type === 'BODY') {
-        const bodyComp: any = { type: 'BODY', text: comp.text };
-        if (comp.example) bodyComp.example = comp.example;
-        metaComponents.push(bodyComp);
-      } else if (type === 'FOOTER') {
-        metaComponents.push({ type: 'FOOTER', text: comp.text });
-      } else if (type === 'BUTTONS') {
-        const buttons = (comp.buttons || []).map((btn) => {
-          const b: any = { type: btn.type, text: btn.text };
-          if (btn.url) b.url = btn.url;
-          if (btn.phone_number) b.phone_number = btn.phone_number;
-          return b;
-        });
-        metaComponents.push({ type: 'BUTTONS', buttons });
-      }
-    }
+    const metaComponents = this.buildMetaComponents(dto.category ?? template.category, dto.components);
 
     const metaPayload: any = { components: metaComponents };
     if (dto.category) metaPayload.category = dto.category;
@@ -366,8 +407,14 @@ export class TemplatesService {
       throw err;
     }
 
-    template.components = dto.components as any[];
-    template.variables = this.extractVariables(dto.components);
+    const effectiveCategory = dto.category ?? template.category;
+    template.components = (effectiveCategory === TemplateCategory.AUTHENTICATION
+      ? metaComponents
+      : dto.components) as any[];
+    template.variables =
+      effectiveCategory === TemplateCategory.AUTHENTICATION
+        ? []
+        : this.extractVariables(dto.components);
     if (dto.category) template.category = dto.category;
     template.status = TemplateStatus.PENDING;
     template.lastSyncedAt = new Date();
