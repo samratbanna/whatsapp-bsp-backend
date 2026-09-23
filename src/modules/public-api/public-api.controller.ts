@@ -16,6 +16,7 @@ import { MessagesService } from '../messages/messages.service';
 import { TemplatesService } from '../templates/templates.service';
 import { WabaService } from '../waba/waba.service';
 import { ContactsService } from '../contacts/contacts.service';
+import { WalletService } from '../wallet/wallet.service';
 
 @ApiTags('Public API')
 @ApiSecurity('X-API-Key')
@@ -28,6 +29,7 @@ export class PublicApiController {
     private readonly templatesService: TemplatesService,
     private readonly wabaService: WabaService,
     private readonly contactsService: ContactsService,
+    private readonly walletService: WalletService,
   ) {}
 
   @Post('messages/text')
@@ -39,7 +41,7 @@ export class PublicApiController {
     const result = (await this.messagesService.sendText(orgId, dto as any)) as any;
     return {
       success: true,
-      messageId: result?.messageId || 'msg_live_' + Date.now(),
+      messageId: result?.metaMessageId || result?._id?.toString(),
       status: 'sent',
     };
   }
@@ -59,7 +61,7 @@ export class PublicApiController {
     const result = (await this.messagesService.sendTemplate(orgId, dto as any)) as any;
     return {
       success: true,
-      messageId: result?.messageId || 'msg_live_' + Date.now(),
+      messageId: result?.metaMessageId || result?._id?.toString(),
       status: 'sent',
     };
   }
@@ -79,7 +81,7 @@ export class PublicApiController {
     const result = (await this.messagesService.sendMedia(orgId, dto as any)) as any;
     return {
       success: true,
-      messageId: result?.messageId || 'msg_live_' + Date.now(),
+      messageId: result?.metaMessageId || result?._id?.toString(),
       status: 'sent',
     };
   }
@@ -125,5 +127,10 @@ export class PublicApiController {
   getContacts(@Req() req: any, @Query() query: any) {
     const orgId = req.orgId;
     return this.contactsService.findAll(orgId, query);
+  }
+
+  @Get('wallet/credits')
+  getWalletCredits(@Req() req: any) {
+    return this.walletService.getCredits(req.orgId);
   }
 }

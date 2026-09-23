@@ -8,6 +8,7 @@ import { MessagesModule } from '../messages/messages.module';
 import { TemplatesModule } from '../templates/templates.module';
 import { WabaModule } from '../waba/waba.module';
 import { ContactsModule } from '../contacts/contacts.module';
+import { WalletModule } from '../wallet/wallet.module';
 
 @Module({
   imports: [
@@ -17,6 +18,9 @@ import { ContactsModule } from '../contacts/contacts.module';
     TemplatesModule,
     WabaModule,
     ContactsModule,
+    // Powers GET /public/v1/wallet/credits so an integrating server can read its own
+    // balance without holding admin JWT credentials.
+    WalletModule,
   ],
   controllers: [PublicApiController],
   providers: [RequestLoggerInterceptor],
