@@ -42,7 +42,7 @@ import { AiAgentsModule } from './modules/ai-agents/ai-agents.module';
       imports: [ConfigModule],
       useFactory: (config: ConfigService) => ({
         uri: config.get<string>('MONGODB_URI'),
-        dbName: 'whatsapp-bsp',
+        dbName: config.get<string>('MONGODB_DB_NAME', 'whatsapp-bsp'),
       }),
       inject: [ConfigService],
     }),
