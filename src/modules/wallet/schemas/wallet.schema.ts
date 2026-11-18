@@ -35,6 +35,10 @@ export class Wallet {
   // Block sending when credits exhausted
   @Prop({ default: true }) blockOnEmpty: boolean;
 
+  // Money balance in paise, for a reseller's client: the reseller loads it (after collecting the
+  // money itself) and the client spends it on messages at the rates the reseller set.
+  @Prop({ type: Number, default: 0, min: 0 }) balancePaise: number;
+
   // Last partner top-up references applied to this wallet. The balance increment and the
   // reference are written in one atomic update, so a retried top-up can never credit twice.
   // Hidden: only partnerTopup() reads it, and no save() elsewhere ever touches it.
@@ -129,4 +133,50 @@ WalletTransactionSchema.index({ organization: 1, reason: 1, createdAt: -1 });
 WalletTransactionSchema.index(
   { organization: 1, reference: 1 },
   { unique: true, partialFilterExpression: { reference: { $type: 'string' } } },
+);
+
+
+// ── Money balance ledger (reseller clients) ───────────────────────────
+export type BalanceTransactionDocument = BalanceTransaction & Document;
+
+export enum BalanceReason {
+  RESELLER_ADD    = 'reseller_add',    // reseller loaded money
+  RESELLER_DEDUCT = 'reseller_deduct', // reseller took money back (correction, refund to client)
+  PURCHASE        = 'purchase',        // client bought messages
+  REFUND          = 'refund',          // a purchase that could not be completed
+}
+
+@Schema({ timestamps: true, collection: 'balance_transactions' })
+export class BalanceTransaction {
+  @Prop({ type: Types.ObjectId, ref: 'Organization', required: true })
+  organization: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'Wallet', required: true })
+  wallet: Types.ObjectId;
+
+  @Prop({ type: String, enum: [TransactionType.CREDIT, TransactionType.DEBIT], required: true })
+  type: TransactionType;
+
+  @Prop({ type: String, enum: Object.values(BalanceReason), required: true })
+  reason: BalanceReason;
+
+  @Prop({ type: Number, required: true, min: 1 }) amountPaise: number;
+  @Prop({ type: Number, required: true }) balanceBeforePaise: number;
+  @Prop({ type: Number, required: true }) balanceAfterPaise: number;
+
+  // The order it paid for or refunded (`order:<orderNumber>`, `refund:<orderNumber>`).
+  @Prop({ type: String, trim: true }) reference?: string;
+
+  // The reseller on the other side.
+  @Prop({ type: Types.ObjectId, ref: 'Organization' }) counterparty?: Types.ObjectId;
+
+  @Prop({ type: String, trim: true }) description?: string;
+  @Prop({ type: String, trim: true }) performedBy?: string;
+}
+
+export const BalanceTransactionSchema = SchemaFactory.createForClass(BalanceTransaction);
+BalanceTransactionSchema.index({ organization: 1, createdAt: -1 });
+BalanceTransactionSchema.index(
+  { organization: 1, reference: 1 },
+  { partialFilterExpression: { reference: { $type: 'string' } } },
 );

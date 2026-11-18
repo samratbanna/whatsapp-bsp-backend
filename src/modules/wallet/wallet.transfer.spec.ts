@@ -34,7 +34,7 @@ async function setup(resellerCredits = 100, clientCredits = 0) {
     transactional: clientCredits,
     lowTransactionalAlertSent: true,
   });
-  return { ...m, service: new WalletService(m.walletModel, m.txModel) };
+  return { ...m, service: new WalletService(m.walletModel, m.txModel, m.balanceTxModel) };
 }
 
 describe('WalletService.transferCredits', () => {

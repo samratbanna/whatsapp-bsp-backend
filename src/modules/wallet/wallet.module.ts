@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { Wallet, WalletSchema, WalletTransaction, WalletTransactionSchema } from './schemas/wallet.schema';
+import {
+  BalanceTransaction, BalanceTransactionSchema,
+  Wallet, WalletSchema, WalletTransaction, WalletTransactionSchema,
+} from './schemas/wallet.schema';
 import { WalletService } from './wallet.service';
 import { WalletController } from './wallet.controller';
 
@@ -9,6 +12,7 @@ import { WalletController } from './wallet.controller';
     MongooseModule.forFeature([
       { name: Wallet.name, schema: WalletSchema },
       { name: WalletTransaction.name, schema: WalletTransactionSchema },
+      { name: BalanceTransaction.name, schema: BalanceTransactionSchema },
     ]),
   ],
   controllers: [WalletController],

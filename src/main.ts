@@ -62,7 +62,7 @@ async function bootstrap() {
       .addTag('Wallet')
       .addTag('Pricing')
       .addTag('Reseller')
-      .addTag('Plans')
+      .addTag('Rates')
       .addTag('Billing')
       .addTag('Public API')
       .addApiKey(

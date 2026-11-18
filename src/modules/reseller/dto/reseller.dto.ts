@@ -1,5 +1,6 @@
 import {
   IsEmail,
+  IsNumber,
   IsEnum,
   IsInt,
   IsOptional,
@@ -21,8 +22,10 @@ import {
 import { CreateOrganizationDto } from '../../organizations/dto/organization.dto';
 import { WalletCategory } from '../../wallet/schemas/wallet.schema';
 import { OrgStatus } from '../../../common/enums';
+import { RatesDto } from '../../rates/dto/rates.dto';
 
 const MAX_TRANSFER = 10_000_000;
+const MAX_BALANCE = 10_000_000; // ₹1 crore per entry
 
 export class InitialCreditsDto {
   @ApiPropertyOptional({ example: 1000 })
@@ -81,6 +84,26 @@ export class CreateClientDto extends OmitType(CreateOrganizationDto, [
   @ValidateNested()
   @Type(() => InitialCreditsDto)
   initialCredits?: InitialCreditsDto;
+
+  @ApiPropertyOptional({
+    type: RatesDto,
+    description:
+      'What the client pays per message (paise). A category without a rate cannot be bought.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => RatesDto)
+  rates?: RatesDto;
+
+  @ApiPropertyOptional({
+    example: 1000,
+    description: 'Money (₹) to load on the client balance right away',
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(MAX_BALANCE)
+  openingBalance?: number;
 }
 
 export class UpdateClientDto extends PartialType(
@@ -106,6 +129,20 @@ export class TransferCreditsDto {
   credits!: number;
 
   @ApiPropertyOptional({ example: 'Paid ₹2,000 via UPI on 18 Nov' })
+  @IsString()
+  @IsOptional()
+  @MaxLength(300)
+  note?: string;
+}
+
+export class BalanceChangeDto {
+  @ApiProperty({ example: 1000, description: 'Amount in ₹ (up to 2 decimals)' })
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Max(MAX_BALANCE)
+  amount!: number;
+
+  @ApiPropertyOptional({ example: 'Received ₹1,000 via UPI' })
   @IsString()
   @IsOptional()
   @MaxLength(300)

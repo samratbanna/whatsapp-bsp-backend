@@ -1,6 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 import { OrgStatus } from '../../../common/enums';
+import { RateCard, RateCardSchema } from '../../rates/schemas/rate-card.schema';
 
 export type OrganizationDocument = Organization & Document;
 
@@ -156,6 +157,13 @@ export class Organization {
   // onboarded by a reseller.
   @Prop({ type: String, enum: ['admin', 'self_signup', 'reseller'], default: 'admin' })
   source: 'admin' | 'self_signup' | 'reseller';
+
+  // ── Message rates ────────────────────────────────────────────────
+  // What this organization pays per message, in paise. Direct customers and resellers: set by
+  // the super admin; a category left empty uses the default rate. Reseller clients: set by the
+  // reseller; a category left empty can't be bought.
+  @Prop({ type: RateCardSchema, default: undefined })
+  rates?: RateCard;
 }
 
 export const OrganizationSchema = SchemaFactory.createForClass(Organization);

@@ -54,7 +54,7 @@ function makeService(start = { transactional: 50, promotional: 0, authentication
     }),
   };
 
-  const service = new WalletService(walletModel, txModel);
+  const service = new WalletService(walletModel, txModel, {} as any);
   return { service, wallet, txs, walletModel, txModel };
 }
 

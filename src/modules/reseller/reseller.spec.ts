@@ -15,6 +15,7 @@ jest.mock('../organizations/organizations.service', () => ({
   OrganizationsService: class {},
 }));
 jest.mock('../users/users.service', () => ({ UsersService: class {} }));
+jest.mock('../billing/billing.service', () => ({ BillingService: class {} }));
 
 const RESELLER = new Types.ObjectId().toHexString();
 const MY_CLIENT = new Types.ObjectId().toHexString();
@@ -73,15 +74,29 @@ describe('ResellerService', () => {
   async function setup(resellerCredits = 1000) {
     const w = fakeWalletModels();
     await w.seed(RESELLER, { transactional: resellerCredits });
-    const walletService = new WalletService(w.walletModel, w.txModel);
+    const walletService = new WalletService(
+      w.walletModel,
+      w.txModel,
+      w.balanceTxModel,
+    );
     const orgsService: any = {
       findClientOf: jest.fn(async (resellerId: string, clientId: string) => {
         if (resellerId === RESELLER && clientId === MY_CLIENT) return clientOrg;
         throw new NotFoundException('Client not found');
       }),
       create: jest.fn(async () => clientOrg),
+      setRates: jest.fn(async (_id: string, rates: any) => ({
+        ...clientOrg,
+        rates,
+      })),
     };
-    const service = new ResellerService(orgsService, {} as any, walletService);
+    const service = new ResellerService(
+      orgsService,
+      {} as any,
+      walletService,
+      {} as any,
+      {} as any,
+    );
     return { service, w, orgsService };
   }
 
@@ -187,5 +202,91 @@ describe('ResellerService', () => {
     );
     expect(res.credits.transactional).toBe(250);
     expect(w.wallet(RESELLER).transactional).toBe(750);
+  });
+
+  it('sets rates and loads an opening balance when creating the client', async () => {
+    const { service, orgsService, w } = await setup(1000);
+    const dto: any = {
+      name: 'New Co',
+      ownerEmail: 'o@new.co',
+      ownerPassword: 'Passw0rd!',
+      rates: { transactional: 18 },
+      openingBalance: 500.5,
+    };
+    const res = await service.createClient(resellerOrg, dto, 'u1');
+    expect(orgsService.create).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        rates: expect.anything(),
+        openingBalance: expect.anything(),
+      }),
+      expect.anything(),
+    );
+    expect(orgsService.setRates).toHaveBeenCalledWith(MY_CLIENT, {
+      transactional: 18,
+    });
+    expect(res.organization.rates).toEqual({ transactional: 18 });
+    expect(res.credits.balance).toBe(500.5);
+    expect(w.balanceTxs[0]).toMatchObject({
+      reason: 'reseller_add',
+      amountPaise: 50050,
+    });
+  });
+
+  it("adds and deducts the client's balance, never below zero, only for its own client", async () => {
+    const { service, w } = await setup();
+    await expect(
+      service.changeClientBalance(
+        resellerOrg,
+        MY_CLIENT,
+        { amount: 1000, note: 'UPI' },
+        'u1',
+        'add',
+      ),
+    ).resolves.toEqual({ balance: 1000 });
+    await expect(
+      service.changeClientBalance(
+        resellerOrg,
+        MY_CLIENT,
+        { amount: 250.25 },
+        'u1',
+        'deduct',
+      ),
+    ).resolves.toEqual({ balance: 749.75 });
+    await expect(
+      service.changeClientBalance(
+        resellerOrg,
+        MY_CLIENT,
+        { amount: 750 },
+        'u1',
+        'deduct',
+      ),
+    ).rejects.toThrow(/Insufficient balance/);
+    await expect(
+      service.changeClientBalance(
+        resellerOrg,
+        OTHER_CLIENT,
+        { amount: 10 },
+        'u1',
+        'add',
+      ),
+    ).rejects.toThrow(NotFoundException);
+    expect(w.wallet(MY_CLIENT).balancePaise).toBe(74975);
+    expect(w.balanceTxs[0].description).toContain('Big Reseller — UPI');
+  });
+
+  it("sets only its own client's rates", async () => {
+    const { service, orgsService } = await setup();
+    await expect(
+      service.setClientRates(RESELLER, MY_CLIENT, {
+        transactional: 20,
+        promotional: null,
+      }),
+    ).resolves.toEqual({
+      rates: { transactional: 20, promotional: null, authentication: null },
+    });
+    await expect(
+      service.setClientRates(RESELLER, OTHER_CLIENT, { transactional: 1 }),
+    ).rejects.toThrow(NotFoundException);
+    expect(orgsService.setRates).toHaveBeenCalledTimes(1);
   });
 });

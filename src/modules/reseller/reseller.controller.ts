@@ -18,11 +18,14 @@ import { WalletTxQueryDto } from '../wallet/dto/wallet.dto';
 import { ResellerGuard } from './guards/reseller.guard';
 import { ResellerService } from './reseller.service';
 import {
+  BalanceChangeDto,
   ClientListQueryDto,
   CreateClientDto,
   TransferCreditsDto,
   UpdateClientDto,
 } from './dto/reseller.dto';
+import { RatesDto } from '../rates/dto/rates.dto';
+import { PageQueryDto, SalesQueryDto } from '../billing/dto/billing.dto';
 
 /**
  * Reseller panel. Every route is scoped to the caller's own reseller organization
@@ -36,7 +39,9 @@ export class ResellerController {
   constructor(private readonly resellerService: ResellerService) {}
 
   @Get('dashboard')
-  @ApiOperation({ summary: 'Own credits, client counts and transfer totals' })
+  @ApiOperation({
+    summary: 'Own credits and rates, client counts, transfer totals and sales',
+  })
   dashboard(@Req() req: any) {
     return this.resellerService.dashboard(req.reseller);
   }
@@ -47,6 +52,14 @@ export class ResellerController {
   })
   transfers(@Req() req: any, @Query() query: WalletTxQueryDto) {
     return this.resellerService.transfers(req.reseller._id.toString(), query);
+  }
+
+  @Get('sales')
+  @ApiOperation({
+    summary: 'Messages clients bought from their balance, with cost and margin',
+  })
+  sales(@Req() req: any, @Query() query: SalesQueryDto) {
+    return this.resellerService.sales(req.reseller._id.toString(), query);
   }
 
   // ── Clients ────────────────────────────────────────────────────────
@@ -116,6 +129,72 @@ export class ResellerController {
     @Query() query: WalletTxQueryDto,
   ) {
     return this.resellerService.clientTransactions(
+      req.reseller._id.toString(),
+      id,
+      query,
+    );
+  }
+
+  // ── Rates ──────────────────────────────────────────────────────────
+
+  @Put('clients/:id/rates')
+  @ApiOperation({
+    summary:
+      'What the client pays per message (paise); null removes a rate (category not for sale)',
+  })
+  setRates(@Req() req: any, @Param('id') id: string, @Body() dto: RatesDto) {
+    return this.resellerService.setClientRates(
+      req.reseller._id.toString(),
+      id,
+      dto,
+    );
+  }
+
+  // ── Money balance ──────────────────────────────────────────────────
+
+  @Post('clients/:id/balance/add')
+  @ApiOperation({
+    summary: "Load money (₹) on the client's balance after collecting it",
+  })
+  addBalance(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: BalanceChangeDto,
+    @CurrentUser('sub') userId: string,
+  ) {
+    return this.resellerService.changeClientBalance(
+      req.reseller,
+      id,
+      dto,
+      userId,
+      'add',
+    );
+  }
+
+  @Post('clients/:id/balance/deduct')
+  @ApiOperation({ summary: "Take money (₹) back off the client's balance" })
+  deductBalance(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: BalanceChangeDto,
+    @CurrentUser('sub') userId: string,
+  ) {
+    return this.resellerService.changeClientBalance(
+      req.reseller,
+      id,
+      dto,
+      userId,
+      'deduct',
+    );
+  }
+
+  @Get('clients/:id/balance/transactions')
+  clientBalanceTransactions(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Query() query: PageQueryDto,
+  ) {
+    return this.resellerService.clientBalanceTransactions(
       req.reseller._id.toString(),
       id,
       query,

@@ -12,19 +12,30 @@ import { randomBytes } from 'crypto';
 import { Order, OrderDocument, OrderStatus } from './schemas/order.schema';
 import {
   AdminOrderQueryDto,
+  BalancePurchaseDto,
   CreateOrderDto,
   MarkPaidDto,
   OrderQueryDto,
+  PageQueryDto,
+  SalesQueryDto,
 } from './dto/billing.dto';
 import { AirpayService, AirpayTxn } from './gateways/airpay.service';
-import { PlansService } from '../plans/plans.service';
-import { planAmounts } from '../plans/schemas/plan.schema';
+import { RatesService } from '../rates/rates.service';
+import {
+  LABEL,
+  PricedItem,
+  describeItems,
+  priceItems,
+  rupees,
+  totals,
+} from '../rates/rates.util';
 import { OrganizationsService } from '../organizations/organizations.service';
+import { OrganizationDocument } from '../organizations/schemas/organization.schema';
 import { UsersService } from '../users/users.service';
 import { WalletService } from '../wallet/wallet.service';
 import {
+  BalanceReason,
   TransactionReason,
-  WalletCategory,
 } from '../wallet/schemas/wallet.schema';
 import { OrgStatus } from '../../common/enums';
 
@@ -33,6 +44,8 @@ const IN_PROGRESS = new Set(['211', '402', '403']);
 const NO_RECORD = '503';
 // An order nobody paid for within this window is closed as failed.
 const ABANDON_AFTER_MS = 48 * 60 * 60 * 1000;
+// A balance purchase finishes inside one request; one still open after this was interrupted.
+const BALANCE_STUCK_MS = 15 * 60 * 1000;
 
 type Source = 'return' | 'ipn' | 'poll' | 'cron' | 'admin';
 
@@ -43,13 +56,43 @@ export class BillingService {
   constructor(
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
     private readonly airpay: AirpayService,
-    private readonly plansService: PlansService,
+    private readonly ratesService: RatesService,
     private readonly orgsService: OrganizationsService,
     private readonly usersService: UsersService,
     private readonly walletService: WalletService,
   ) {}
 
-  // ── Checkout ───────────────────────────────────────────────────────
+  // ── What this organization pays, and how it pays ─────────────────
+  async myRates(orgId: string) {
+    if (!orgId)
+      throw new ForbiddenException(
+        'Only organization accounts can buy credits',
+      );
+    const org = await this.orgsService.findOne(orgId);
+    const settings = await this.ratesService.getSettings();
+    const { rates } = await this.ratesService.effectiveRates(org, settings);
+
+    if (!org.reseller) {
+      return {
+        channel: 'airpay' as const,
+        rates,
+        gstPercent: settings.gstPercent,
+        minPurchase: settings.minPurchase,
+      };
+    }
+    const reseller = await this.orgsService
+      .findOne(org.reseller.toString())
+      .catch(() => null);
+    return {
+      channel: 'balance' as const,
+      rates,
+      gstPercent: settings.gstPercent,
+      balance: (await this.walletService.getBalance(orgId)) / 100,
+      seller: { name: reseller?.name ?? 'your reseller' },
+    };
+  }
+
+  // ── Online checkout (direct customers and resellers) ──────────────
   async createOrder(orgId: string, userId: string, dto: CreateOrderDto) {
     if (!orgId)
       throw new ForbiddenException(
@@ -58,21 +101,32 @@ export class BillingService {
 
     const org = await this.orgsService.findOne(orgId);
     if (org.reseller) {
-      // Reseller clients get credits from their reseller, never from the website.
+      // Reseller clients pay their reseller and buy from the balance it loads.
       const reseller = await this.orgsService
         .findOne(org.reseller.toString())
         .catch(() => null);
       throw new ForbiddenException(
-        `Your account is managed by ${reseller?.name ?? 'your reseller'}. Please contact them to add credits.`,
+        `Your account is managed by ${reseller?.name ?? 'your reseller'}. Buy from your balance, or contact them to add balance.`,
       );
     }
     if (org.status === OrgStatus.SUSPENDED) {
       throw new ForbiddenException('Your organization is suspended');
     }
 
-    const plan = await this.plansService.findActive(dto.plan);
-    const user = await this.usersService.findOne(userId);
+    const settings = await this.ratesService.getSettings();
+    const { rates } = await this.ratesService.effectiveRates(org, settings);
+    const items = priceItems(rates, dto.items);
+    const { subtotalPaise, gstPaise, totalPaise } = totals(
+      items,
+      settings.gstPercent,
+    );
+    if (subtotalPaise < Math.round(settings.minPurchase * 100)) {
+      throw new BadRequestException(
+        `Minimum purchase is ${rupees(Math.round(settings.minPurchase * 100))} before GST. This order is ${rupees(subtotalPaise)}.`,
+      );
+    }
 
+    const user = await this.usersService.findOne(userId);
     const phone = digits(dto.phone || user.phone || org.phone || '');
     if (phone.length < 8 || phone.length > 15) {
       throw new BadRequestException(
@@ -85,23 +139,16 @@ export class BillingService {
         .catch(() => undefined);
     }
 
-    const { subtotalPaise, gstPaise, totalPaise } = planAmounts(plan);
     const order = await this.createWithUniqueNumber({
       organization: new Types.ObjectId(orgId),
       user: new Types.ObjectId(userId),
-      plan: plan._id,
-      planSnapshot: {
-        name: plan.name,
-        slug: plan.slug,
-        transactional: plan.transactionalCredits,
-        promotional: plan.promotionalCredits,
-        authentication: plan.authenticationCredits,
-      },
+      items,
       subtotalPaise,
-      gstPercent: plan.gstPercent,
+      gstPercent: settings.gstPercent,
       gstPaise,
       totalPaise,
       amount: (totalPaise / 100).toFixed(2),
+      gateway: 'airpay',
       buyer: { name: user.name, email: user.email, phone },
     });
 
@@ -114,7 +161,7 @@ export class BillingService {
         lastName: (rest.join(' ') || firstName || 'Customer').slice(0, 50),
       });
       this.logger.log(
-        `Order ${order.orderNumber} created: org=${orgId} plan=${plan.slug} ₹${order.amount}`,
+        `Order ${order.orderNumber} created: org=${orgId} ${describeItems(items)} ₹${order.amount}`,
       );
       return { order: this.present(order), payment };
     } catch (e) {
@@ -131,6 +178,276 @@ export class BillingService {
     }
   }
 
+  // ── Balance purchase (reseller clients) ────────────────────────────
+  /**
+   * The client pays from the balance its reseller loaded, at the rates the reseller set; the
+   * messages come out of the reseller's own credits. Without Mongo transactions the steps run in
+   * order and each failure undoes the steps before it: take the money, move each category's
+   * credits, mark paid. The order records progress, so an interrupted purchase is visible.
+   */
+  async buyWithBalance(orgId: string, userId: string, dto: BalancePurchaseDto) {
+    if (!orgId)
+      throw new ForbiddenException(
+        'Only organization accounts can buy credits',
+      );
+    const org = await this.orgsService.findOne(orgId);
+    if (!org.reseller) {
+      throw new ForbiddenException(
+        'Pay online to buy messages — balance purchases are for accounts managed by a reseller',
+      );
+    }
+    if (org.status === OrgStatus.SUSPENDED) {
+      throw new ForbiddenException('Your organization is suspended');
+    }
+    const reseller = await this.orgsService.findOne(org.reseller.toString());
+    if (reseller.status === OrgStatus.SUSPENDED) {
+      throw new ForbiddenException(
+        `Purchases are paused. Please contact ${reseller.name}.`,
+      );
+    }
+    const organization = new Types.ObjectId(orgId);
+
+    if (dto.requestId) {
+      const prior = await this.orderModel.findOne({
+        organization,
+        idempotencyKey: dto.requestId,
+      });
+      if (prior) return this.balanceResult(prior, orgId);
+    }
+
+    const settings = await this.ratesService.getSettings();
+    const [{ rates }, { rates: costRates }] = await Promise.all([
+      this.ratesService.effectiveRates(org, settings),
+      this.ratesService.effectiveRates(reseller, settings),
+    ]);
+    const items = priceItems(rates, dto.items).map((i) => ({
+      ...i,
+      ...(costRates[i.category] != null
+        ? { costRatePaise: costRates[i.category]! }
+        : {}),
+    }));
+    const { subtotalPaise, gstPaise, totalPaise } = totals(
+      items,
+      settings.gstPercent,
+    );
+    const costPaise = items.every((i) => i.costRatePaise != null)
+      ? items.reduce(
+          (s, i) =>
+            s +
+            Math.round((i.quantity * Math.round(i.costRatePaise! * 100)) / 100),
+          0,
+        )
+      : undefined;
+
+    // Friendly checks first; the conditional updates below are what actually guard the balances.
+    const resellerId = reseller._id.toString();
+    const stock = await this.walletService.getCredits(resellerId);
+    const short = items.filter((i) => stock[i.category] < i.quantity);
+    if (short.length) {
+      throw new BadRequestException(
+        `${short.map((i) => LABEL[i.category]).join(' and ')} messages are not available in that quantity right now. Please contact ${reseller.name}.`,
+      );
+    }
+    const balance = await this.walletService.getBalance(orgId);
+    if (balance < totalPaise) {
+      throw new BadRequestException(
+        `Insufficient balance: you have ${rupees(balance)}, this purchase needs ${rupees(totalPaise)}. Ask ${reseller.name} to add balance.`,
+      );
+    }
+
+    let order: OrderDocument;
+    try {
+      order = await this.createWithUniqueNumber({
+        organization,
+        user: new Types.ObjectId(userId),
+        items,
+        subtotalPaise,
+        gstPercent: settings.gstPercent,
+        gstPaise,
+        totalPaise,
+        amount: (totalPaise / 100).toFixed(2),
+        gateway: 'balance',
+        seller: reseller._id as Types.ObjectId,
+        ...(costPaise != null ? { costPaise } : {}),
+        ...(dto.requestId ? { idempotencyKey: dto.requestId } : {}),
+      });
+    } catch (e: any) {
+      if (e?.code === 11000 && dto.requestId) {
+        const prior = await this.orderModel.findOne({
+          organization,
+          idempotencyKey: dto.requestId,
+        });
+        if (prior) return this.balanceResult(prior, orgId);
+      }
+      throw e;
+    }
+    const no = order.orderNumber;
+    const fail = (message: string) =>
+      this.orderModel.updateOne(
+        { _id: order._id },
+        { $set: { status: OrderStatus.FAILED, gatewayMessage: message } },
+      );
+
+    // 1. Take the money.
+    try {
+      await this.walletService.changeBalance(orgId, {
+        direction: 'debit',
+        amountPaise: totalPaise,
+        reason: BalanceReason.PURCHASE,
+        reference: `order:${no}`,
+        counterparty: resellerId,
+        description: `Bought ${describeItems(items)} messages — order ${no}`,
+        performedBy: userId,
+      });
+    } catch (e: any) {
+      await fail(e?.message ?? 'Balance could not be charged');
+      throw e;
+    }
+    await this.orderModel.updateOne(
+      { _id: order._id },
+      { $set: { balanceDebitedAt: new Date() } },
+    );
+
+    // 2. Move the credits from the reseller to the client, one category at a time.
+    const moved: PricedItem[] = [];
+    try {
+      for (const item of items) {
+        await this.walletService.transferCredits(resellerId, orgId, {
+          category: item.category,
+          credits: item.quantity,
+          performedBy: userId,
+          netAddedOn: 'receiver',
+          fromDescription: `Sold ${item.quantity} ${item.category} credits to ${org.name} @ ${item.ratePaise}p — order ${no}`,
+          toDescription: `Bought ${item.quantity} ${item.category} credits @ ${item.ratePaise}p — order ${no}`,
+        });
+        moved.push(item);
+      }
+    } catch (e: any) {
+      this.logger.warn(
+        `Balance order ${no}: credit move failed (${e?.message}) — undoing`,
+      );
+      for (const item of moved) {
+        await this.walletService
+          .transferCredits(orgId, resellerId, {
+            category: item.category,
+            credits: item.quantity,
+            performedBy: 'system',
+            netAddedOn: 'sender',
+            fromDescription: `Reversed — order ${no} could not be completed`,
+            toDescription: `Returned from ${org.name} — order ${no} could not be completed`,
+          })
+          .catch((err: any) =>
+            this.logger.error(
+              `Balance order ${no}: could not return ${item.quantity} ${item.category} to reseller ${resellerId}: ${err?.message}`,
+            ),
+          );
+      }
+      await this.walletService
+        .changeBalance(orgId, {
+          direction: 'credit',
+          amountPaise: totalPaise,
+          reason: BalanceReason.REFUND,
+          reference: `refund:${no}`,
+          counterparty: resellerId,
+          description: `Refund — order ${no} could not be completed`,
+          performedBy: 'system',
+        })
+        .catch((err: any) =>
+          this.logger.error(
+            `Balance order ${no}: REFUND FAILED, ${rupees(totalPaise)} owed to org ${orgId}: ${err?.message}`,
+          ),
+        );
+      await fail(
+        'Messages were not available; the amount was refunded to your balance',
+      );
+      throw new BadRequestException(
+        `Those messages are not available right now and nothing was charged. Please contact ${reseller.name}.`,
+      );
+    }
+
+    // 3. Done.
+    const paid = (await this.orderModel.findOneAndUpdate(
+      { _id: order._id },
+      {
+        $set: {
+          status: OrderStatus.PAID,
+          paidAt: new Date(),
+          paidVia: 'balance',
+          creditsAppliedAt: new Date(),
+        },
+      },
+      { new: true },
+    ))!;
+    this.logger.log(
+      `Balance order ${no} PAID: client=${orgId} reseller=${resellerId} ${describeItems(items)} ${rupees(totalPaise)}`,
+    );
+    return this.balanceResult(paid, orgId);
+  }
+
+  private async balanceResult(order: OrderDocument, orgId: string) {
+    const credits = await this.walletService.getCredits(orgId);
+    return { order: this.present(order), balance: credits.balance, credits };
+  }
+
+  async balanceHistory(orgId: string, query: PageQueryDto) {
+    return this.walletService.getBalanceTransactions(orgId, query);
+  }
+
+  // ── Reseller: what its clients bought ──────────────────────────────
+  async listSales(resellerId: string, query: SalesQueryDto) {
+    const filter: any = { seller: new Types.ObjectId(resellerId) };
+    if (query.clientId)
+      filter.organization = new Types.ObjectId(query.clientId);
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
+    const [rows, total] = await Promise.all([
+      this.orderModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .populate('organization', 'name slug')
+        .exec(),
+      this.orderModel.countDocuments(filter),
+    ]);
+    return {
+      data: rows.map((o) => this.presentSale(o)),
+      total,
+      page,
+      limit,
+      pages: Math.ceil(total / limit),
+    };
+  }
+
+  /** Paid client purchases: all time and this calendar month (IST). */
+  async salesSummary(resellerId: string) {
+    const monthStart = istMonthStart();
+    const [row] = await this.orderModel.aggregate([
+      {
+        $match: {
+          seller: new Types.ObjectId(resellerId),
+          status: OrderStatus.PAID,
+        },
+      },
+      {
+        $facet: {
+          all: [{ $group: groupSales() }],
+          month: [
+            { $match: { paidAt: { $gte: monthStart } } },
+            { $group: groupSales() },
+          ],
+        },
+      },
+    ]);
+    const shape = (g: any) => ({
+      orders: g?.orders ?? 0,
+      sales: (g?.sales ?? 0) / 100,
+      cost: (g?.cost ?? 0) / 100,
+      margin: ((g?.sales ?? 0) - (g?.cost ?? 0)) / 100,
+    });
+    return { allTime: shape(row?.all?.[0]), thisMonth: shape(row?.month?.[0]) };
+  }
+
   private async createWithUniqueNumber(
     doc: Partial<Order>,
   ): Promise<OrderDocument> {
@@ -141,7 +458,9 @@ export class BillingService {
           orderNumber: newOrderNumber(),
         });
       } catch (e: any) {
-        if (e?.code !== 11000 || i >= 4) throw e;
+        // Retry only an order-number clash; a repeated idempotency key is the caller's to handle.
+        if (e?.code !== 11000 || e?.keyPattern?.idempotencyKey || i >= 4)
+          throw e;
       }
     }
   }
@@ -230,6 +549,7 @@ export class BillingService {
       this.logger.warn(`Airpay ${source}: unknown order ${orderNumber}`);
       return null;
     }
+    if (order.gateway === 'balance') return order; // never went through Airpay
     if (order.status === OrderStatus.PAID) {
       await this.ensureCredits(order);
       return order;
@@ -384,19 +704,19 @@ export class BillingService {
     );
   }
 
-  /** Load the plan's credits. Idempotent per order+category, so safe to call any number of times. */
+  /** Load the order's credits. Idempotent per order+category, so safe to call any number of times. */
   async ensureCredits(order: OrderDocument): Promise<void> {
     if (order.creditsAppliedAt || order.status !== OrderStatus.PAID) return;
+    if (order.gateway === 'balance') return; // moved from the reseller at purchase time
     const orgId = order.organization.toString();
-    for (const category of Object.values(WalletCategory)) {
-      const credits = order.planSnapshot[category] ?? 0;
-      if (credits < 1) continue;
+    for (const item of order.items) {
+      if (item.quantity < 1) continue;
       await this.walletService.creditOnce(orgId, {
-        category,
-        credits,
-        reference: `order:${order.orderNumber}:${category}`,
+        category: item.category,
+        credits: item.quantity,
+        reference: `order:${order.orderNumber}:${item.category}`,
         reason: TransactionReason.PURCHASE,
-        description: `Plan "${order.planSnapshot.name}" — order ${order.orderNumber}`,
+        description: `Bought ${item.quantity} ${item.category} credits @ ${item.ratePaise}p — order ${order.orderNumber}`,
         performedBy: order.paidVia === 'manual' ? 'admin' : order.gateway,
       });
     }
@@ -421,10 +741,17 @@ export class BillingService {
   // Covers a browser that never came back and an IPN that never arrived.
   @Cron(CronExpression.EVERY_10_MINUTES)
   async reconcile(): Promise<void> {
+    await this.reconcileBalanceOrders().catch((e) =>
+      this.logger.error(`Reconcile balance orders: ${e?.message}`),
+    );
     if (!this.airpay.configured) return;
 
     const stuck = await this.orderModel
-      .find({ status: OrderStatus.PAID, creditsAppliedAt: { $exists: false } })
+      .find({
+        status: OrderStatus.PAID,
+        gateway: { $ne: 'balance' },
+        creditsAppliedAt: { $exists: false },
+      })
       .limit(50);
     for (const order of stuck) {
       await this.ensureCredits(order).catch((e) =>
@@ -438,6 +765,7 @@ export class BillingService {
     const open = await this.orderModel
       .find({
         status: { $in: [OrderStatus.CREATED, OrderStatus.PENDING] },
+        gateway: { $ne: 'balance' },
         createdAt: { $lte: new Date(now - 5 * 60_000) },
         $or: [
           { lastCheckedAt: { $exists: false } },
@@ -456,11 +784,61 @@ export class BillingService {
     }
   }
 
+  /**
+   * A balance purchase still open long after it started was cut off mid-way (process restart).
+   * Nothing charged → just close it. Charged → flag it for a person to finish or refund; guessing
+   * which credits moved would risk paying twice.
+   */
+  private async reconcileBalanceOrders() {
+    const open = await this.orderModel
+      .find({
+        gateway: 'balance',
+        status: OrderStatus.CREATED,
+        createdAt: { $lte: new Date(Date.now() - BALANCE_STUCK_MS) },
+      })
+      .limit(25);
+    for (const order of open) {
+      const charged =
+        !!order.balanceDebitedAt ||
+        (await this.walletService.hasBalanceEntry(
+          order.organization.toString(),
+          `order:${order.orderNumber}`,
+        ));
+      if (!charged) {
+        await this.orderModel.updateOne(
+          { _id: order._id, status: OrderStatus.CREATED },
+          {
+            $set: {
+              status: OrderStatus.FAILED,
+              gatewayMessage: 'Not completed',
+            },
+          },
+        );
+        continue;
+      }
+      this.logger.error(
+        `Balance order ${order.orderNumber} was interrupted after charging ${rupees(order.totalPaise)} — needs manual review`,
+      );
+      await this.orderModel.updateOne(
+        { _id: order._id, status: OrderStatus.CREATED },
+        {
+          $set: {
+            status: OrderStatus.PENDING,
+            gatewayMessage:
+              'Interrupted after the balance was charged — needs manual review',
+          },
+        },
+      );
+    }
+  }
+
   // ── Super admin ────────────────────────────────────────────────────
   async listAll(query: AdminOrderQueryDto) {
     const filter: any = {};
     if (query.status) filter.status = query.status;
     if (query.orgId) filter.organization = new Types.ObjectId(query.orgId);
+    if (query.gateway === 'balance') filter.gateway = 'balance';
+    if (query.gateway === 'airpay') filter.gateway = { $ne: 'balance' };
     return this.page(filter, query, true);
   }
 
@@ -472,6 +850,13 @@ export class BillingService {
 
   /** For a payment confirmed outside the verify API (sandbox, or seen on the Airpay dashboard). */
   async markPaid(orderNumber: string, dto: MarkPaidDto, adminId: string) {
+    const existing = await this.orderModel.findOne({ orderNumber });
+    if (!existing) throw new NotFoundException('Order not found');
+    if (existing.gateway === 'balance') {
+      throw new BadRequestException(
+        'Balance purchases are not paid online and cannot be marked paid',
+      );
+    }
     const paid = await this.orderModel.findOneAndUpdate(
       { orderNumber, status: { $ne: OrderStatus.PAID } },
       {
@@ -485,11 +870,7 @@ export class BillingService {
       },
       { new: true },
     );
-    if (!paid) {
-      const exists = await this.orderModel.exists({ orderNumber });
-      if (!exists) throw new NotFoundException('Order not found');
-      throw new BadRequestException('Order is already paid');
-    }
+    if (!paid) throw new BadRequestException('Order is already paid');
     this.logger.log(
       `Order ${orderNumber} marked PAID manually by ${adminId}: ${dto.note}`,
     );
@@ -514,7 +895,10 @@ export class BillingService {
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit);
-    if (admin) q = q.populate('organization', 'name slug');
+    if (admin)
+      q = q
+        .populate('organization', 'name slug')
+        .populate('seller', 'name slug');
     const [rows, total] = await Promise.all([
       q.exec(),
       this.orderModel.countDocuments(filter),
@@ -533,7 +917,15 @@ export class BillingService {
       id: order._id.toString(),
       orderNumber: order.orderNumber,
       status: order.status,
-      plan: order.planSnapshot,
+      items: (order.items ?? []).map((i) => ({
+        category: i.category,
+        quantity: i.quantity,
+        rate: i.ratePaise, // paise per message
+        amount: i.amountPaise / 100,
+        ...(admin && i.costRatePaise != null
+          ? { costRate: i.costRatePaise }
+          : {}),
+      })),
       subtotal: order.subtotalPaise / 100,
       gstPercent: order.gstPercent,
       gst: order.gstPaise / 100,
@@ -550,7 +942,9 @@ export class BillingService {
       ...(admin
         ? {
             organization: order.organization,
-            buyer: order.buyer,
+            seller: order.seller ?? null,
+            cost: order.costPaise != null ? order.costPaise / 100 : null,
+            buyer: order.buyer ?? null,
             paidVia: order.paidVia ?? null,
             manualNote: order.manualNote ?? null,
             gatewayStatus: order.gatewayStatus ?? null,
@@ -560,6 +954,45 @@ export class BillingService {
         : {}),
     };
   }
+
+  /** A client purchase as its reseller sees it: what the client paid, what it cost, the margin. */
+  presentSale(order: OrderDocument) {
+    const base = this.present(order);
+    const cost = order.costPaise != null ? order.costPaise / 100 : null;
+    return {
+      ...base,
+      client: order.organization,
+      items: (order.items ?? []).map((i) => ({
+        category: i.category,
+        quantity: i.quantity,
+        rate: i.ratePaise,
+        amount: i.amountPaise / 100,
+        costRate: i.costRatePaise ?? null,
+      })),
+      cost,
+      margin:
+        cost != null
+          ? Math.round(order.subtotalPaise - order.costPaise!) / 100
+          : null,
+    };
+  }
+}
+
+function groupSales() {
+  return {
+    _id: null,
+    orders: { $sum: 1 },
+    sales: { $sum: '$subtotalPaise' },
+    cost: { $sum: { $ifNull: ['$costPaise', 0] } },
+  };
+}
+
+/** First instant of the current month in India. */
+function istMonthStart(now = new Date()): Date {
+  const ist = new Date(now.getTime() + 5.5 * 3600_000);
+  return new Date(
+    Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), 1) - 5.5 * 3600_000,
+  );
 }
 
 function newOrderNumber(): string {

@@ -179,6 +179,8 @@ export class OrganizationsService {
     const org = await this.findOne(id);
     if (resellerId === null) {
       org.reseller = null;
+      // The rates were the reseller's selling price; as a direct customer the defaults apply.
+      org.rates = undefined;
       return org.save();
     }
     if (resellerId === id) throw new BadRequestException('An organization cannot be its own reseller');
@@ -188,6 +190,8 @@ export class OrganizationsService {
     const reseller = await this.findOne(resellerId);
     if (!reseller.isReseller) throw new BadRequestException('Target organization is not a reseller');
     org.reseller = reseller._id as Types.ObjectId;
+    // The new reseller sets its own selling price.
+    org.rates = undefined;
     return org.save();
   }
 
@@ -250,6 +254,24 @@ export class OrganizationsService {
     const org = await this.orgModel
       .findByIdAndUpdate(id, dto, { new: true })
       .exec();
+    if (!org) throw new NotFoundException('Organization not found');
+    return org;
+  }
+
+  /**
+   * Set or clear per-message rates (paise). A key that is missing stays as it is; null clears it.
+   */
+  async setRates(
+    id: string,
+    rates: Partial<Record<'transactional' | 'promotional' | 'authentication', number | null>>,
+  ): Promise<OrganizationDocument> {
+    const $set: Record<string, number | null> = {};
+    for (const c of ['transactional', 'promotional', 'authentication'] as const) {
+      if (rates[c] !== undefined) $set[`rates.${c}`] = rates[c] ?? null;
+    }
+    const org = Object.keys($set).length
+      ? await this.orgModel.findByIdAndUpdate(id, { $set }, { new: true }).exec()
+      : await this.orgModel.findById(id).exec();
     if (!org) throw new NotFoundException('Organization not found');
     return org;
   }

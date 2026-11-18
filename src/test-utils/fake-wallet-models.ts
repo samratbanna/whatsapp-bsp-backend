@@ -22,6 +22,7 @@ const WALLET_DEFAULTS = {
   lowPromotionalAlertSent: false,
   lowAuthenticationAlertSent: false,
   blockOnEmpty: true,
+  balancePaise: 0,
 };
 
 const same = (a: any, b: any) => String(a) === String(b);
@@ -101,10 +102,46 @@ export function fakeWalletModels() {
     }),
   };
 
+  const balanceTxs: any[] = [];
+  const chain = (rows: any[]) => {
+    const q: any = {
+      sort: () => q,
+      skip: () => q,
+      limit: () => q,
+      lean: () => q,
+      exec: async () => rows,
+    };
+    return q;
+  };
+  const balanceTxModel: any = {
+    create: jest.fn(async (doc: any) => {
+      const row = { _id: new Types.ObjectId(), createdAt: new Date(), ...doc };
+      balanceTxs.push(row);
+      return row;
+    }),
+    exists: jest.fn(async (f: any) => balanceTxs.some((t) => matches(t, f))),
+    find: jest.fn((f: any) =>
+      chain(balanceTxs.filter((t) => matches(t, f)).reverse()),
+    ),
+    countDocuments: jest.fn(
+      async (f: any) => balanceTxs.filter((t) => matches(t, f)).length,
+    ),
+    deleteMany: jest.fn(async () => ({})),
+  };
+
   const wallet = (orgId: string) =>
     wallets.find((w) => same(w.organization, orgId));
   const seed = (orgId: string, values: Record<string, any>) =>
     walletModel.create({ organization: new Types.ObjectId(orgId), ...values });
 
-  return { walletModel, txModel, wallets, txs, wallet, seed };
+  return {
+    walletModel,
+    txModel,
+    balanceTxModel,
+    wallets,
+    txs,
+    balanceTxs,
+    wallet,
+    seed,
+  };
 }

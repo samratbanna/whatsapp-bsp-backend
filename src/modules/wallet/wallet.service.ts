@@ -8,6 +8,7 @@ import {
   Wallet, WalletDocument,
   WalletTransaction, WalletTransactionDocument,
   WalletCategory, TransactionType, TransactionReason,
+  BalanceTransaction, BalanceTransactionDocument, BalanceReason,
 } from './schemas/wallet.schema';
 import {
   AddCreditsDto, BulkAddCreditsDto,
@@ -40,6 +41,16 @@ export interface TransferInput {
   netAddedOn: 'receiver' | 'sender';
 }
 
+export interface BalanceChangeInput {
+  direction: 'credit' | 'debit';
+  amountPaise: number;
+  reason: BalanceReason;
+  description: string;
+  performedBy: string;
+  reference?: string;
+  counterparty?: string;
+}
+
 /**
  * Every balance change is a single atomic `$inc` on the wallet document. Message sends,
  * refunds, admin top-ups and reseller transfers can hit one wallet at the same time (a reseller
@@ -53,6 +64,8 @@ export class WalletService {
   constructor(
     @InjectModel(Wallet.name) private walletModel: Model<WalletDocument>,
     @InjectModel(WalletTransaction.name) private txModel: Model<WalletTransactionDocument>,
+    @InjectModel(BalanceTransaction.name)
+    private balanceTxModel: Model<BalanceTransactionDocument>,
   ) { }
 
   // ── Get or create wallet ───────────────────────────────────────────
@@ -89,6 +102,7 @@ export class WalletService {
       transactional: wallet.transactional,
       promotional: wallet.promotional,
       authentication: wallet.authentication,
+      balance: (wallet.balancePaise ?? 0) / 100,
       blockOnEmpty: wallet.blockOnEmpty,
       thresholds: {
         transactional: wallet.lowTransactionalThreshold,
@@ -99,21 +113,129 @@ export class WalletService {
   }
 
   // ── Balances for many orgs at once (reseller client list) ──────────
-  async getBalancesForOrgs(orgIds: string[]): Promise<Map<string, CreditBalances>> {
+  async getBalancesForOrgs(
+    orgIds: string[],
+  ): Promise<Map<string, { credits: CreditBalances; balancePaise: number }>> {
     const rows = await this.walletModel
       .find({ organization: { $in: orgIds.map((id) => new Types.ObjectId(id)) } })
-      .select('organization transactional promotional authentication')
+      .select('organization transactional promotional authentication balancePaise')
       .lean()
       .exec();
-    const out = new Map<string, CreditBalances>();
+    const out = new Map<string, { credits: CreditBalances; balancePaise: number }>();
     for (const r of rows as any[]) {
       out.set(r.organization.toString(), {
-        transactional: r.transactional ?? 0,
-        promotional: r.promotional ?? 0,
-        authentication: r.authentication ?? 0,
+        credits: {
+          transactional: r.transactional ?? 0,
+          promotional: r.promotional ?? 0,
+          authentication: r.authentication ?? 0,
+        },
+        balancePaise: r.balancePaise ?? 0,
       });
     }
     return out;
+  }
+
+  // ── Money balance (reseller clients) ───────────────────────────────
+  async getBalance(orgId: string): Promise<number> {
+    const wallet = await this.getOrCreate(orgId);
+    return wallet.balancePaise ?? 0;
+  }
+
+  /**
+   * One atomic `$inc`. A debit only matches while the balance covers it, so two purchases racing
+   * each other (or a purchase racing the reseller taking money back) can't go below zero.
+   */
+  async changeBalance(
+    orgId: string,
+    input: BalanceChangeInput,
+  ): Promise<{ balancePaise: number; transaction: BalanceTransactionDocument | null }> {
+    const { amountPaise, direction } = input;
+    if (!Number.isInteger(amountPaise) || amountPaise < 1) {
+      throw new BadRequestException('Amount must be at least ₹0.01');
+    }
+    const organization = new Types.ObjectId(orgId);
+    await this.getOrCreate(orgId);
+
+    const delta = direction === 'credit' ? amountPaise : -amountPaise;
+    const wallet = await this.walletModel.findOneAndUpdate(
+      direction === 'credit'
+        ? { organization }
+        : { organization, balancePaise: { $gte: amountPaise } },
+      { $inc: { balancePaise: delta } },
+      { new: true },
+    );
+    if (!wallet) {
+      const available = await this.getBalance(orgId);
+      throw new BadRequestException(
+        `Insufficient balance. Available: ${inr(available)}, needed: ${inr(amountPaise)}.`,
+      );
+    }
+
+    const after = wallet.balancePaise;
+    let transaction: BalanceTransactionDocument | null = null;
+    try {
+      transaction = await this.balanceTxModel.create({
+        organization,
+        wallet: wallet._id,
+        type: direction === 'credit' ? TransactionType.CREDIT : TransactionType.DEBIT,
+        reason: input.reason,
+        amountPaise,
+        balanceBeforePaise: after - delta,
+        balanceAfterPaise: after,
+        reference: input.reference,
+        counterparty: input.counterparty ? new Types.ObjectId(input.counterparty) : undefined,
+        description: input.description,
+        performedBy: input.performedBy,
+      });
+    } catch (e: any) {
+      // The money moved; a missing ledger row is a reporting gap, logged rather than thrown.
+      this.logger.error(`Balance ${direction} org=${orgId}: ledger row not written: ${e?.message}`);
+    }
+
+    this.logger.log(
+      `Balance ${direction}: org=${orgId} ${delta > 0 ? '+' : ''}${delta}p → ${after}p (${input.reason})`,
+    );
+    return { balancePaise: after, transaction };
+  }
+
+  async hasBalanceEntry(orgId: string, reference: string): Promise<boolean> {
+    return !!(await this.balanceTxModel.exists({
+      organization: new Types.ObjectId(orgId),
+      reference,
+    }));
+  }
+
+  async getBalanceTransactions(orgId: string, query: { page?: number; limit?: number }) {
+    const filter = { organization: new Types.ObjectId(orgId) };
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.min(200, Math.max(1, Number(query.limit) || 50));
+    const [data, total] = await Promise.all([
+      this.balanceTxModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean()
+        .exec(),
+      this.balanceTxModel.countDocuments(filter),
+    ]);
+    return {
+      data: data.map((t: any) => ({
+        id: t._id.toString(),
+        type: t.type,
+        reason: t.reason,
+        amount: t.amountPaise / 100,
+        balanceBefore: t.balanceBeforePaise / 100,
+        balanceAfter: t.balanceAfterPaise / 100,
+        reference: t.reference ?? null,
+        description: t.description ?? null,
+        createdAt: t.createdAt,
+      })),
+      total,
+      page,
+      limit,
+      pages: Math.ceil(total / limit),
+    };
   }
 
   // ── Add credits (super admin) ──────────────────────────────────────
@@ -686,6 +808,7 @@ export class WalletService {
   async deleteForOrg(orgId: string): Promise<void> {
     const orgObjectId = new Types.ObjectId(orgId);
     await this.txModel.deleteMany({ organization: orgObjectId });
+    await this.balanceTxModel?.deleteMany({ organization: orgObjectId });
     await this.walletModel.deleteOne({ organization: orgObjectId });
     this.logger.log(`Wallet and transactions deleted for org=${orgId}`);
   }
@@ -713,6 +836,10 @@ export class WalletService {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────
+function inr(paise: number): string {
+  return `₹${(paise / 100).toFixed(2)}`;
+}
+
 function cap(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }

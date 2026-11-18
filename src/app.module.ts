@@ -34,7 +34,7 @@ import { AiAgentsModule } from './modules/ai-agents/ai-agents.module';
 
 // Reseller + SaaS
 import { ResellerModule } from './modules/reseller/reseller.module';
-import { PlansModule } from './modules/plans/plans.module';
+import { RatesModule } from './modules/rates/rates.module';
 import { BillingModule } from './modules/billing/billing.module';
 
 @Module({
@@ -105,7 +105,7 @@ import { BillingModule } from './modules/billing/billing.module';
 
     // Reseller + SaaS
     ResellerModule,
-    PlansModule,
+    RatesModule,
     BillingModule,
   ],
 })

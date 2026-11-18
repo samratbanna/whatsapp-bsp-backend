@@ -27,12 +27,14 @@ import { Role } from '../../common/enums';
 import { BillingService } from './billing.service';
 import {
   AdminOrderQueryDto,
+  BalancePurchaseDto,
   CreateOrderDto,
   MarkPaidDto,
   OrderQueryDto,
+  PageQueryDto,
 } from './dto/billing.dto';
 
-/** Org admin buys a plan and follows its orders. */
+/** Org admin buys messages at its own rates and follows its orders. */
 @ApiTags('Billing')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -41,12 +43,24 @@ import {
 export class BillingController {
   constructor(private readonly billingService: BillingService) {}
 
+  @Get('rates')
+  @ApiOperation({
+    summary: 'My per-message rates (paise), GST, and how I pay',
+    description:
+      "channel 'airpay': pay online (direct customers, resellers). channel 'balance': a reseller's " +
+      'client buying from the balance its reseller loaded.',
+  })
+  rates(@CurrentUser('orgId') orgId: string) {
+    return this.billingService.myRates(orgId);
+  }
+
   @Post('orders')
   @ApiOperation({
-    summary: 'Start checkout for a plan',
+    summary: 'Start online checkout for a number of messages per category',
     description:
-      'Returns the order and an Airpay form ({ url, method, fields }). The browser must POST ' +
-      'those fields to url right away (the gateway token is short-lived).',
+      'Total = quantity × my rate per category, plus GST. Returns the order and an Airpay form ' +
+      '({ url, method, fields }). The browser must POST those fields to url right away (the ' +
+      'gateway token is short-lived).',
   })
   create(
     @CurrentUser('orgId') orgId: string,
@@ -54,6 +68,28 @@ export class BillingController {
     @Body() dto: CreateOrderDto,
   ) {
     return this.billingService.createOrder(orgId, userId, dto);
+  }
+
+  @Post('purchase')
+  @ApiOperation({
+    summary:
+      "Reseller client: buy messages from my balance at my reseller's rates",
+  })
+  purchase(
+    @CurrentUser('orgId') orgId: string,
+    @CurrentUser('sub') userId: string,
+    @Body() dto: BalancePurchaseDto,
+  ) {
+    return this.billingService.buyWithBalance(orgId, userId, dto);
+  }
+
+  @Get('balance/transactions')
+  @ApiOperation({ summary: 'Reseller client: money balance history' })
+  balanceHistory(
+    @CurrentUser('orgId') orgId: string,
+    @Query() query: PageQueryDto,
+  ) {
+    return this.billingService.balanceHistory(orgId, query);
   }
 
   @Get('orders')

@@ -8,7 +8,7 @@ import {
   AirpayCallbackController,
   BillingController,
 } from './billing.controller';
-import { PlansModule } from '../plans/plans.module';
+import { RatesModule } from '../rates/rates.module';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { UsersModule } from '../users/users.module';
 import { WalletModule } from '../wallet/wallet.module';
@@ -16,7 +16,7 @@ import { WalletModule } from '../wallet/wallet.module';
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: Order.name, schema: OrderSchema }]),
-    PlansModule,
+    RatesModule,
     OrganizationsModule,
     UsersModule,
     WalletModule,
@@ -27,5 +27,6 @@ import { WalletModule } from '../wallet/wallet.module';
     AdminBillingController,
   ],
   providers: [BillingService, AirpayService],
+  exports: [BillingService],
 })
 export class BillingModule {}
