@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
@@ -7,8 +8,13 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { UsersService } from './modules/users/users.service';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
   const config = app.get(ConfigService);
+
+  // nginx proxies from loopback (deploy/nginx-upload-size.conf). Trusting only loopback makes
+  // req.ip the real client from X-Forwarded-For, so rate limits are per visitor rather than one
+  // shared bucket for 127.0.0.1 — and a remote caller cannot spoof the header.
+  app.set('trust proxy', 'loopback');
 
   // Global prefix
   app.setGlobalPrefix('api/v1');
@@ -55,6 +61,9 @@ async function bootstrap() {
       .addTag('Analytics')
       .addTag('Wallet')
       .addTag('Pricing')
+      .addTag('Reseller')
+      .addTag('Plans')
+      .addTag('Billing')
       .addTag('Public API')
       .addApiKey(
         {

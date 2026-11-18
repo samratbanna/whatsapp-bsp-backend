@@ -1,7 +1,7 @@
 import {
   Injectable,
   UnauthorizedException,
-  BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -12,6 +12,7 @@ import { LoginDto, RegisterDto, RefreshTokenDto } from './dto/auth.dto';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
 import {
   ALL_FEATURE_PERMISSIONS,
+  OrgStatus,
   Role,
   UserStatus,
 } from '../../common/enums';
@@ -25,22 +26,35 @@ export class AuthService {
     private config: ConfigService,
   ) {}
 
-  // ── Register: creates org + org_admin user ─────────────────────────
+  // ── Register (website self sign-up): creates org + org_admin user ──
   async register(dto: RegisterDto) {
-    // Create org first
+    // Check first so a taken email never leaves an empty organization behind.
+    if (await this.usersService.findByEmail(dto.email)) {
+      throw new ConflictException('Email already registered');
+    }
+
     const org = await this.orgsService.create({
       name: dto.organizationName,
-    }, { createAdminUser: false });
+      phone: dto.phone,
+      billingEmail: dto.email,
+    }, { createAdminUser: false, source: 'self_signup' });
 
-    // Create org admin
-    const user = await this.usersService.create({
-      name: dto.name,
-      email: dto.email,
-      password: dto.password,
-      role: Role.ORG_ADMIN,
-      permissions: ALL_FEATURE_PERMISSIONS,
-      organizationId: (org._id as any).toString(),
-    });
+    let user;
+    try {
+      user = await this.usersService.create({
+        name: dto.name,
+        email: dto.email,
+        password: dto.password,
+        role: Role.ORG_ADMIN,
+        permissions: ALL_FEATURE_PERMISSIONS,
+        organizationId: (org._id as any).toString(),
+        phone: dto.phone,
+      });
+    } catch (error) {
+      // e.g. the same email registering twice at once — undo the organization.
+      await this.orgsService.remove((org._id as any).toString()).catch(() => undefined);
+      throw error;
+    }
 
     const tokens = await this.generateTokens(user);
     await this.usersService.updateRefreshToken(
@@ -60,12 +74,14 @@ export class AuthService {
     const user = await this.usersService.findByEmail(dto.email, true);
 
     if (!user) throw new UnauthorizedException('Invalid credentials');
-    if (user.status === UserStatus.SUSPENDED) {
-      throw new UnauthorizedException('Account suspended. Contact support.');
-    }
 
     const passwordMatch = await bcrypt.compare(dto.password, user.password);
     if (!passwordMatch) throw new UnauthorizedException('Invalid credentials');
+
+    if (user.status === UserStatus.SUSPENDED) {
+      throw new UnauthorizedException('Account suspended. Contact support.');
+    }
+    this.assertOrgNotSuspended(user);
 
     const tokens = await this.generateTokens(user);
     await this.usersService.updateRefreshToken(
@@ -92,6 +108,7 @@ export class AuthService {
     if (user.status === UserStatus.SUSPENDED) {
       throw new UnauthorizedException('Account suspended');
     }
+    this.assertOrgNotSuspended(user);
 
     const tokens = await this.generateTokens(user);
     await this.usersService.updateRefreshToken(
@@ -129,6 +146,15 @@ export class AuthService {
     ]);
 
     return { accessToken, refreshToken };
+  }
+
+  // A suspended organization (by the super admin, or by its reseller) locks out its users. The
+  // access token already issued lives on until it expires (JWT_EXPIRES_IN), then refresh fails.
+  private assertOrgNotSuspended(user: any) {
+    const org = user.organization;
+    if (org && typeof org === 'object' && org.status === OrgStatus.SUSPENDED) {
+      throw new UnauthorizedException('Organization suspended. Contact your provider.');
+    }
   }
 
   private sanitizeUser(user: any) {

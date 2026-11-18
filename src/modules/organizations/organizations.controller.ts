@@ -10,14 +10,17 @@ import {
   UseGuards,
   Patch,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { Role, OrgStatus } from '../../common/enums';
+import { Role } from '../../common/enums';
 import { OrganizationsService } from './organizations.service';
 import {
+  AssignResellerDto,
   CreateOrganizationDto,
+  OrgListQueryDto,
+  SetResellerDto,
   UpdateOrganizationDto,
 } from './dto/organization.dto';
 
@@ -35,9 +38,8 @@ export class OrganizationsController {
   }
 
   @Get()
-  @ApiQuery({ name: 'status', enum: OrgStatus, required: false })
-  findAll(@Query('status') status?: OrgStatus) {
-    return this.orgsService.findAll(status);
+  findAll(@Query() query: OrgListQueryDto) {
+    return this.orgsService.findAll(query);
   }
 
   @Get(':id')
@@ -58,6 +60,24 @@ export class OrganizationsController {
   @Patch(':id/activate')
   activate(@Param('id') id: string) {
     return this.orgsService.activate(id);
+  }
+
+  @Patch(':id/reseller')
+  @ApiOperation({ summary: 'Enable / disable reseller capability for an organization' })
+  setReseller(@Param('id') id: string, @Body() dto: SetResellerDto) {
+    return this.orgsService.setReseller(id, dto.enabled);
+  }
+
+  @Patch(':id/assign-reseller')
+  @ApiOperation({ summary: 'Move an organization under a reseller, or detach it (resellerId: null)' })
+  assignReseller(@Param('id') id: string, @Body() dto: AssignResellerDto) {
+    return this.orgsService.assignReseller(id, dto.resellerId ?? null);
+  }
+
+  @Get(':id/clients')
+  @ApiOperation({ summary: "List a reseller's client organizations" })
+  findClients(@Param('id') id: string, @Query() query: OrgListQueryDto) {
+    return this.orgsService.findAll({ ...query, resellerId: id, kind: undefined });
   }
 
   @Delete(':id')

@@ -140,7 +140,24 @@ export class Organization {
 
   @Prop({ type: LoginUserDetailsSchema })
   loginUserDetails?: LoginUserDetails;
+
+  // ── Reseller ─────────────────────────────────────────────────────
+  // A reseller is an organization the super admin has enabled to onboard its own clients and
+  // hand them credits out of its own wallet. One level only: a reseller has no reseller, and a
+  // client is never a reseller.
+  @Prop({ default: false })
+  isReseller: boolean;
+
+  // Set on a client organization: the reseller that owns it. null = a direct customer.
+  @Prop({ type: Types.ObjectId, ref: 'Organization', default: null })
+  reseller: Types.ObjectId | null;
+
+  // How the organization joined: created by super admin, self sign-up on the website, or
+  // onboarded by a reseller.
+  @Prop({ type: String, enum: ['admin', 'self_signup', 'reseller'], default: 'admin' })
+  source: 'admin' | 'self_signup' | 'reseller';
 }
 
 export const OrganizationSchema = SchemaFactory.createForClass(Organization);
 OrganizationSchema.index({ slug: 1 }, { unique: true });
+OrganizationSchema.index({ reseller: 1, createdAt: -1 });

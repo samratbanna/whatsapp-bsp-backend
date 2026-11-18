@@ -1,4 +1,7 @@
 import {
+  IsBoolean,
+  IsIn,
+  IsMongoId,
   IsString,
   IsEmail,
   IsOptional,
@@ -233,3 +236,41 @@ export class UpdateOrganizationDto extends PartialType(CreateOrganizationDto) {
   status?: OrgStatus;
 }
 
+export class SetResellerDto {
+  @ApiProperty({ example: true, description: 'Enable or disable reseller capability' })
+  @IsBoolean()
+  enabled!: boolean;
+}
+
+export class AssignResellerDto {
+  @ApiProperty({
+    example: '662e8d31fc13ae5f86000123',
+    nullable: true,
+    description: 'Reseller organization id, or null to make this a direct customer',
+  })
+  @IsOptional()
+  @IsMongoId()
+  resellerId!: string | null;
+}
+
+export class OrgListQueryDto {
+  @ApiPropertyOptional({ enum: OrgStatus })
+  @IsEnum(OrgStatus)
+  @IsOptional()
+  status?: OrgStatus;
+
+  @ApiPropertyOptional({ enum: ['reseller', 'client', 'direct'] })
+  @IsIn(['reseller', 'client', 'direct'])
+  @IsOptional()
+  kind?: 'reseller' | 'client' | 'direct';
+
+  @ApiPropertyOptional({ description: 'Only clients of this reseller' })
+  @IsMongoId()
+  @IsOptional()
+  resellerId?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  search?: string;
+}

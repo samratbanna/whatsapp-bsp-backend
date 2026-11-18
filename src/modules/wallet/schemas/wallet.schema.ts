@@ -68,7 +68,8 @@ export enum TransactionReason {
   ADJUSTMENT    = 'adjustment',    // correction
   BONUS         = 'bonus',         // free credits
   EXPIRY        = 'expiry',        // credits expired (future)
-  PURCHASE      = 'purchase',      // bought online through a partner (e.g. Swaad Boss)
+  PURCHASE      = 'purchase',      // bought online (website plan via Airpay, or a partner like Swaad Boss)
+  TRANSFER      = 'transfer',      // moved between a reseller and one of its clients (see counterparty)
 }
 
 @Schema({ timestamps: true })
@@ -108,14 +109,22 @@ export class WalletTransaction {
   @Prop({ trim: true }) description?: string;
   @Prop({ trim: true }) performedBy?: string; // admin userId for topups
 
-  // Partner's idempotency key for a top-up (e.g. its order number). Unique per organization.
+  // Idempotency key for a credit that must land exactly once: a partner top-up (its order
+  // number) or a website plan purchase (`order:<orderNumber>:<category>`). Unique per organization.
   @Prop({ trim: true }) reference?: string;
+
+  // Reseller transfers: the other side of the move, and the id shared by both ledger rows.
+  @Prop({ type: Types.ObjectId, ref: 'Organization' })
+  counterparty?: Types.ObjectId;
+
+  @Prop({ trim: true }) transferId?: string;
 }
 
 export const WalletTransactionSchema = SchemaFactory.createForClass(WalletTransaction);
 WalletTransactionSchema.index({ organization: 1, createdAt: -1 });
 WalletTransactionSchema.index({ organization: 1, category: 1 });
 WalletTransactionSchema.index({ metaMessageId: 1 });
+WalletTransactionSchema.index({ organization: 1, reason: 1, createdAt: -1 });
 // Only partner top-ups carry a reference, so every existing row is outside this index.
 WalletTransactionSchema.index(
   { organization: 1, reference: 1 },

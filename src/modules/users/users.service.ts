@@ -65,7 +65,7 @@ export class UsersService {
   async findOne(id: string): Promise<UserDocument> {
     const user = await this.userModel
       .findById(id)
-      .populate('organization', 'name slug status plan')
+      .populate('organization', 'name slug status plan isReseller reseller')
       .select('-password -refreshToken')
       .exec();
     if (!user) throw new NotFoundException('User not found');

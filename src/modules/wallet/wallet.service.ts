@@ -1,9 +1,9 @@
 import {
-  Injectable, NotFoundException,
-  BadRequestException, Logger,
+  Injectable, BadRequestException, Logger, InternalServerErrorException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { randomUUID } from 'crypto';
 import {
   Wallet, WalletDocument,
   WalletTransaction, WalletTransactionDocument,
@@ -15,6 +15,37 @@ import {
   UpdateWalletSettingsDto, WalletTxQueryDto,
 } from './dto/wallet.dto';
 
+export type CreditBalances = Record<WalletCategory, number>;
+
+export interface CreditOnceInput {
+  category: WalletCategory;
+  credits: number;
+  reference: string;
+  reason: TransactionReason;
+  description?: string;
+  performedBy: string;
+}
+
+export interface TransferInput {
+  category: WalletCategory;
+  credits: number;
+  performedBy: string;
+  fromDescription: string;
+  toDescription: string;
+  /**
+   * Which side's lifetime "added" total reflects the move. A reseller allocating to a client
+   * counts as credits added for the client ('receiver'); taking them back undoes that on the
+   * client ('sender'). The reseller's own lifetime totals stay about what it bought and used.
+   */
+  netAddedOn: 'receiver' | 'sender';
+}
+
+/**
+ * Every balance change is a single atomic `$inc` on the wallet document. Message sends,
+ * refunds, admin top-ups and reseller transfers can hit one wallet at the same time (a reseller
+ * moving credits while its own campaign is running), and a read-modify-save would let one of
+ * them overwrite the other.
+ */
 @Injectable()
 export class WalletService {
   private readonly logger = new Logger(WalletService.name);
@@ -30,69 +61,24 @@ export class WalletService {
       organization: new Types.ObjectId(orgId),
     });
     if (!wallet) {
-      wallet = await this.walletModel.create({
-        organization: new Types.ObjectId(orgId),
-      });
+      try {
+        wallet = await this.walletModel.create({
+          organization: new Types.ObjectId(orgId),
+        });
+      } catch (e: any) {
+        // Two first-time callers raced on the unique index — the other one created it.
+        if (e?.code !== 11000) throw e;
+        wallet = await this.walletModel.findOne({ organization: new Types.ObjectId(orgId) });
+        if (!wallet) throw e;
+      }
     }
     return wallet;
   }
 
-  // ── Initialize wallet on org creation (10 credits per segment) ────
+  // ── Initialize wallet on org creation ──────────────────────────────
   async initializeForOrg(orgId: string): Promise<WalletDocument> {
-    const DEFAULT_CREDITS = 0;
-    const wallet = await this.walletModel.create({
-      organization: new Types.ObjectId(orgId),
-      transactional: DEFAULT_CREDITS,
-      promotional: DEFAULT_CREDITS,
-      authentication: DEFAULT_CREDITS,
-      totalTransactionalAdded: DEFAULT_CREDITS,
-      totalPromotionalAdded: DEFAULT_CREDITS,
-      totalAuthenticationAdded: DEFAULT_CREDITS,
-    });
-
-    // Record welcome bonus transactions for each category
-    await this.txModel.insertMany([
-      {
-        organization: new Types.ObjectId(orgId),
-        wallet: wallet._id,
-        type: TransactionType.CREDIT,
-        reason: TransactionReason.BONUS,
-        category: WalletCategory.TRANSACTIONAL,
-        credits: DEFAULT_CREDITS,
-        creditsBefore: 0,
-        creditsAfter: DEFAULT_CREDITS,
-        description: 'Welcome bonus — 10 transactional credits',
-        performedBy: 'system',
-      },
-      {
-        organization: new Types.ObjectId(orgId),
-        wallet: wallet._id,
-        type: TransactionType.CREDIT,
-        reason: TransactionReason.BONUS,
-        category: WalletCategory.PROMOTIONAL,
-        credits: DEFAULT_CREDITS,
-        creditsBefore: 0,
-        creditsAfter: DEFAULT_CREDITS,
-        description: 'Welcome bonus — 10 promotional credits',
-        performedBy: 'system',
-      },
-      {
-        organization: new Types.ObjectId(orgId),
-        wallet: wallet._id,
-        type: TransactionType.CREDIT,
-        reason: TransactionReason.BONUS,
-        category: WalletCategory.AUTHENTICATION,
-        credits: DEFAULT_CREDITS,
-        creditsBefore: 0,
-        creditsAfter: DEFAULT_CREDITS,
-        description: 'Welcome bonus — 10 authentication credits',
-        performedBy: 'system',
-      },
-    ]);
-
-    this.logger.log(
-      `Wallet initialized for org=${orgId} with ${DEFAULT_CREDITS} credits per segment`,
-    );
+    const wallet = await this.getOrCreate(orgId);
+    this.logger.log(`Wallet initialized for org=${orgId}`);
     return wallet;
   }
 
@@ -112,32 +98,52 @@ export class WalletService {
     };
   }
 
+  // ── Balances for many orgs at once (reseller client list) ──────────
+  async getBalancesForOrgs(orgIds: string[]): Promise<Map<string, CreditBalances>> {
+    const rows = await this.walletModel
+      .find({ organization: { $in: orgIds.map((id) => new Types.ObjectId(id)) } })
+      .select('organization transactional promotional authentication')
+      .lean()
+      .exec();
+    const out = new Map<string, CreditBalances>();
+    for (const r of rows as any[]) {
+      out.set(r.organization.toString(), {
+        transactional: r.transactional ?? 0,
+        promotional: r.promotional ?? 0,
+        authentication: r.authentication ?? 0,
+      });
+    }
+    return out;
+  }
+
   // ── Add credits (super admin) ──────────────────────────────────────
   async addCredits(
     orgId: string,
     dto: AddCreditsDto,
     adminId: string,
   ): Promise<{ wallet: WalletDocument; transaction: WalletTransactionDocument }> {
-    const wallet = await this.getOrCreate(orgId);
-    const creditsBefore = wallet[dto.category] as number;
-    const creditsAfter = creditsBefore + dto.credits;
+    const organization = new Types.ObjectId(orgId);
+    const f = fieldsFor(dto.category);
+    await this.getOrCreate(orgId);
 
-    // Update balance
-    wallet[dto.category] = creditsAfter;
-    (wallet as any)[`total${cap(dto.category)}Added`] += dto.credits;
-
-    // Reset alert flag on top-up
-    (wallet as any)[`low${cap(dto.category)}AlertSent`] = false;
-    await wallet.save();
+    const wallet = (await this.walletModel.findOneAndUpdate(
+      { organization },
+      {
+        $inc: { [f.balance]: dto.credits, [f.added]: dto.credits },
+        $set: { [f.alert]: false }, // reset alert flag on top-up
+      },
+      { new: true },
+    ))!;
+    const creditsAfter = wallet[dto.category] as number;
 
     const transaction = await this.txModel.create({
-      organization: new Types.ObjectId(orgId),
+      organization,
       wallet: wallet._id,
       type: TransactionType.CREDIT,
       reason: dto.reason,
       category: dto.category,
       credits: dto.credits,
-      creditsBefore,
+      creditsBefore: creditsAfter - dto.credits,
       creditsAfter,
       description: dto.description || `${dto.credits} ${dto.category} credits added`,
       performedBy: adminId,
@@ -155,28 +161,31 @@ export class WalletService {
     dto: DeductCreditsDto,
     adminId: string,
   ): Promise<{ wallet: WalletDocument; transaction: WalletTransactionDocument }> {
-    const wallet = await this.getOrCreate(orgId);
-    const creditsBefore = wallet[dto.category] as number;
+    const organization = new Types.ObjectId(orgId);
+    const f = fieldsFor(dto.category);
+    await this.getOrCreate(orgId);
 
-    if (dto.credits > creditsBefore) {
+    const wallet = await this.walletModel.findOneAndUpdate(
+      { organization, [f.balance]: { $gte: dto.credits } },
+      { $inc: { [f.balance]: -dto.credits, [f.used]: dto.credits } },
+      { new: true },
+    );
+    if (!wallet) {
+      const current = await this.getOrCreate(orgId);
       throw new BadRequestException(
-        `Cannot deduct ${dto.credits} from ${dto.category}. Current balance: ${creditsBefore}.`,
+        `Cannot deduct ${dto.credits} from ${dto.category}. Current balance: ${current[dto.category]}.`,
       );
     }
-
-    const creditsAfter = creditsBefore - dto.credits;
-    wallet[dto.category] = creditsAfter;
-    (wallet as any)[`total${cap(dto.category)}Used`] += dto.credits;
-    await wallet.save();
+    const creditsAfter = wallet[dto.category] as number;
 
     const transaction = await this.txModel.create({
-      organization: new Types.ObjectId(orgId),
+      organization,
       wallet: wallet._id,
       type: TransactionType.DEBIT,
       reason: TransactionReason.ADJUSTMENT,
       category: dto.category,
       credits: dto.credits,
-      creditsBefore,
+      creditsBefore: creditsAfter + dto.credits,
       creditsAfter,
       description: dto.description || `Admin deducted ${dto.credits} ${dto.category} credits`,
       performedBy: adminId,
@@ -194,63 +203,45 @@ export class WalletService {
     dto: BulkAddCreditsDto,
     adminId: string,
   ): Promise<WalletDocument> {
-    if (dto.transactional) {
-      await this.addCredits(orgId, {
-        category: WalletCategory.TRANSACTIONAL,
-        credits: dto.transactional,
-        reason: TransactionReason.ADMIN_TOPUP,
-        description: dto.description,
-      }, adminId);
-    }
-    if (dto.promotional) {
-      await this.addCredits(orgId, {
-        category: WalletCategory.PROMOTIONAL,
-        credits: dto.promotional,
-        reason: TransactionReason.ADMIN_TOPUP,
-        description: dto.description,
-      }, adminId);
-    }
-    if (dto.authentication) {
-      await this.addCredits(orgId, {
-        category: WalletCategory.AUTHENTICATION,
-        credits: dto.authentication,
-        reason: TransactionReason.ADMIN_TOPUP,
-        description: dto.description,
-      }, adminId);
+    for (const category of Object.values(WalletCategory)) {
+      const credits = dto[category];
+      if (credits) {
+        await this.addCredits(orgId, {
+          category,
+          credits,
+          reason: TransactionReason.ADMIN_TOPUP,
+          description: dto.description,
+        }, adminId);
+      }
     }
     return this.getOrCreate(orgId);
   }
 
-  // ── Partner top-up (server-to-server, idempotent) ──────────────────
-  // A partner (Swaad Boss) sells credit packs to its customers and loads them here once the
-  // customer has paid. The partner retries until it hears back, so the same `reference` may
-  // arrive many times, concurrently, or after a timeout that actually succeeded — it must
-  // credit exactly once. The balance increment and the reference are one atomic update on the
-  // wallet document, so that holds without a Mongo transaction.
-  async partnerTopup(
+  // ── Credit exactly once per reference (idempotent) ─────────────────
+  // Used by partner top-ups and website plan purchases. Both arrive from systems that retry
+  // until they hear back, so the same `reference` may arrive many times, concurrently, or after a
+  // timeout that actually succeeded — it must credit exactly once. The balance increment and the
+  // reference are one atomic update on the wallet document, so that holds without a Mongo
+  // transaction.
+  async creditOnce(
     orgId: string,
-    dto: PartnerTopupDto,
-  ): Promise<{
-    duplicate: boolean;
-    transaction: WalletTransactionDocument | null;
-    credits: Awaited<ReturnType<WalletService['getCredits']>>;
-  }> {
+    input: CreditOnceInput,
+  ): Promise<{ duplicate: boolean; transaction: WalletTransactionDocument | null }> {
     const organization = new Types.ObjectId(orgId);
-    const { category, credits, reference } = dto;
+    const { category, credits, reference } = input;
+    const f = fieldsFor(category);
 
     // Permanent record first: a reference that is already in the ledger is done.
     const existing = await this.txModel.findOne({ organization, reference });
-    if (existing) {
-      return { duplicate: true, transaction: existing, credits: await this.getCredits(orgId) };
-    }
+    if (existing) return { duplicate: true, transaction: existing };
 
     await this.getOrCreate(orgId);
     const updated = await this.walletModel.findOneAndUpdate(
       { organization, topupRefs: { $ne: reference } },
       {
-        $inc: { [category]: credits, [`total${cap(category)}Added`]: credits },
-        $set: { [`low${cap(category)}AlertSent`]: false },
-        // Bounded: the ledger row above is the long-term record; this only has to cover the
+        $inc: { [f.balance]: credits, [f.added]: credits },
+        $set: { [f.alert]: false },
+        // Bounded: the ledger row below is the long-term record; this only has to cover the
         // gap between the increment and that row being written.
         $push: { topupRefs: { $each: [reference], $slice: -200 } },
       },
@@ -260,7 +251,7 @@ export class WalletService {
     if (!updated) {
       // Another request with this reference won the update.
       const tx = await this.txModel.findOne({ organization, reference });
-      return { duplicate: true, transaction: tx, credits: await this.getCredits(orgId) };
+      return { duplicate: true, transaction: tx };
     }
 
     const creditsAfter = updated[category] as number;
@@ -270,27 +261,172 @@ export class WalletService {
         organization,
         wallet: updated._id,
         type: TransactionType.CREDIT,
-        reason: TransactionReason.PURCHASE,
+        reason: input.reason,
         category,
         credits,
         creditsBefore: creditsAfter - credits,
         creditsAfter,
         reference,
-        description: dto.description || `${credits} ${category} credits purchased`,
-        performedBy: 'partner',
+        description: input.description || `${credits} ${category} credits purchased`,
+        performedBy: input.performedBy,
       });
     } catch (e: any) {
       // The credits are in. A missing ledger row is a reporting gap, not a reason to fail the
-      // call — failing would make the partner retry, and the retry is (correctly) a no-op.
+      // call — failing would make the caller retry, and the retry is (correctly) a no-op.
       this.logger.error(
-        `Partner top-up ${reference}: credits added but ledger row not written: ${e?.message}`,
+        `Credit ${reference}: credits added but ledger row not written: ${e?.message}`,
       );
     }
 
     this.logger.log(
-      `Partner top-up: org=${orgId} cat=${category} +${credits} → ${creditsAfter} ref=${reference}`,
+      `Credit once: org=${orgId} cat=${category} +${credits} → ${creditsAfter} ref=${reference}`,
     );
-    return { duplicate: false, transaction, credits: await this.getCredits(orgId) };
+    return { duplicate: false, transaction };
+  }
+
+  // ── Partner top-up (server-to-server, idempotent) ──────────────────
+  // A partner (Swaad Boss) sells credit packs to its customers and loads them here once the
+  // customer has paid.
+  async partnerTopup(
+    orgId: string,
+    dto: PartnerTopupDto,
+  ): Promise<{
+    duplicate: boolean;
+    transaction: WalletTransactionDocument | null;
+    credits: Awaited<ReturnType<WalletService['getCredits']>>;
+  }> {
+    const result = await this.creditOnce(orgId, {
+      category: dto.category,
+      credits: dto.credits,
+      reference: dto.reference,
+      reason: TransactionReason.PURCHASE,
+      description: dto.description,
+      performedBy: 'partner',
+    });
+    return { ...result, credits: await this.getCredits(orgId) };
+  }
+
+  // ── Move credits between two wallets (reseller ⇄ client) ───────────
+  // The sender's debit is conditional on its balance, so two transfers racing each other (or a
+  // transfer racing the sender's own message sends) can never take the balance below zero.
+  async transferCredits(
+    fromOrgId: string,
+    toOrgId: string,
+    input: TransferInput,
+  ): Promise<{ transferId: string; from: CreditBalances; to: CreditBalances }> {
+    const { category, credits } = input;
+    if (fromOrgId === toOrgId) throw new BadRequestException('Cannot transfer credits to the same wallet');
+    if (!Number.isInteger(credits) || credits < 1) {
+      throw new BadRequestException('credits must be a positive whole number');
+    }
+
+    const fromOrg = new Types.ObjectId(fromOrgId);
+    const toOrg = new Types.ObjectId(toOrgId);
+    const f = fieldsFor(category);
+    await Promise.all([this.getOrCreate(fromOrgId), this.getOrCreate(toOrgId)]);
+
+    const senderInc: Record<string, number> = { [f.balance]: -credits };
+    const receiverInc: Record<string, number> = { [f.balance]: credits };
+    if (input.netAddedOn === 'receiver') receiverInc[f.added] = credits;
+    else senderInc[f.added] = -credits;
+
+    // 1. Debit the sender — only if it has enough.
+    const from = await this.walletModel.findOneAndUpdate(
+      { organization: fromOrg, [f.balance]: { $gte: credits } },
+      { $inc: senderInc },
+      { new: true },
+    );
+    if (!from) {
+      const current = await this.getOrCreate(fromOrgId);
+      throw new BadRequestException(
+        `Insufficient ${category} credits. Available: ${current[category]}, requested: ${credits}.`,
+      );
+    }
+
+    // 2. Credit the receiver; if that fails, put the sender's credits back.
+    let to: WalletDocument | null = null;
+    try {
+      to = await this.walletModel.findOneAndUpdate(
+        { organization: toOrg },
+        { $inc: receiverInc, $set: { [f.alert]: false } },
+        { new: true },
+      );
+      if (!to) throw new Error('receiver wallet not found');
+    } catch (e: any) {
+      const undo: Record<string, number> = {};
+      for (const [k, v] of Object.entries(senderInc)) undo[k] = -v;
+      await this.walletModel
+        .updateOne({ organization: fromOrg }, { $inc: undo })
+        .catch((err: any) =>
+          this.logger.error(
+            `Transfer ${fromOrgId}→${toOrgId}: receiver credit failed AND sender refund failed — ` +
+            `${credits} ${category} credits must be restored to ${fromOrgId} by hand: ${err?.message}`,
+          ),
+        );
+      this.logger.error(`Transfer ${fromOrgId}→${toOrgId} failed: ${e?.message}`);
+      throw new InternalServerErrorException('Transfer failed, no credits were moved. Please retry.');
+    }
+
+    // 3. Ledger: one row per side, linked by transferId.
+    const transferId = randomUUID();
+    const fromAfter = from[category] as number;
+    const toAfter = to[category] as number;
+    try {
+      await this.txModel.insertMany([
+        {
+          organization: fromOrg,
+          wallet: from._id,
+          type: TransactionType.DEBIT,
+          reason: TransactionReason.TRANSFER,
+          category,
+          credits,
+          creditsBefore: fromAfter + credits,
+          creditsAfter: fromAfter,
+          counterparty: toOrg,
+          transferId,
+          description: input.fromDescription,
+          performedBy: input.performedBy,
+        },
+        {
+          organization: toOrg,
+          wallet: to._id,
+          type: TransactionType.CREDIT,
+          reason: TransactionReason.TRANSFER,
+          category,
+          credits,
+          creditsBefore: toAfter - credits,
+          creditsAfter: toAfter,
+          counterparty: fromOrg,
+          transferId,
+          description: input.toDescription,
+          performedBy: input.performedBy,
+        },
+      ]);
+    } catch (e: any) {
+      // Same trade-off as creditOnce: the move happened; the ledger gap is logged, not thrown.
+      this.logger.error(`Transfer ${transferId}: credits moved but ledger rows not written: ${e?.message}`);
+    }
+
+    this.logger.log(
+      `Transfer ${transferId}: ${fromOrgId} → ${toOrgId} cat=${category} ${credits} by=${input.performedBy}`,
+    );
+    return { transferId, from: balancesOf(from), to: balancesOf(to) };
+  }
+
+  // ── Transfer totals for a reseller (what it handed out / took back) ─
+  async getTransferTotals(orgId: string) {
+    const rows = await this.txModel.aggregate([
+      { $match: { organization: new Types.ObjectId(orgId), reason: TransactionReason.TRANSFER } },
+      { $group: { _id: { type: '$type', category: '$category' }, credits: { $sum: '$credits' } } },
+    ]);
+    const empty = (): CreditBalances => ({ transactional: 0, promotional: 0, authentication: 0 });
+    const allocated = empty();
+    const revoked = empty();
+    for (const r of rows) {
+      const bucket = r._id.type === TransactionType.DEBIT ? allocated : revoked;
+      bucket[r._id.category as WalletCategory] = r.credits;
+    }
+    return { allocated, revoked };
   }
 
   // ── KEY: Deduct 1 credit on message send ──────────────────────────
@@ -303,31 +439,41 @@ export class WalletService {
     campaignId?: string,
     metaMessageId?: string,
   ): Promise<WalletTransactionDocument> {
-    const wallet = await this.getOrCreate(orgId);
+    const organization = new Types.ObjectId(orgId);
+    const f = fieldsFor(category);
 
-    const current = wallet[category] as number;
+    let wallet = await this.walletModel.findOneAndUpdate(
+      { organization, [f.balance]: { $gte: 1 } },
+      { $inc: { [f.balance]: -1, [f.used]: 1 } },
+      { new: true },
+    );
+    const debited = !!wallet;
 
-    if (wallet.blockOnEmpty && current < 1) {
-      throw new BadRequestException(
-        `Insufficient ${category} message credits. Current: ${current}. Please contact admin to top up.`,
-      );
+    if (!wallet) {
+      // Empty, or no wallet yet.
+      const current = await this.getOrCreate(orgId);
+      if (current.blockOnEmpty) {
+        throw new BadRequestException(
+          `Insufficient ${category} message credits. Current: ${current[category]}. Please contact admin to top up.`,
+        );
+      }
+      // blockOnEmpty off: the send goes ahead at zero balance; only usage is counted.
+      wallet = (await this.walletModel.findOneAndUpdate(
+        { organization },
+        { $inc: { [f.used]: 1 } },
+        { new: true },
+      ))!;
     }
 
-    const creditsBefore = current;
-    const creditsAfter = Math.max(0, current - 1);
-
-    wallet[category] = creditsAfter;
-    (wallet as any)[`total${cap(category)}Used`] += 1;
-    await wallet.save();
-
+    const creditsAfter = wallet[category] as number;
     const tx = await this.txModel.create({
-      organization: new Types.ObjectId(orgId),
+      organization,
       wallet: wallet._id,
       type: TransactionType.DEBIT,
       reason: TransactionReason.MESSAGE_USE,
       category,
       credits: 1,
-      creditsBefore,
+      creditsBefore: debited ? creditsAfter + 1 : creditsAfter,
       creditsAfter,
       message: messageId ? new Types.ObjectId(messageId) : undefined,
       campaign: campaignId ? new Types.ObjectId(campaignId) : undefined,
@@ -335,14 +481,17 @@ export class WalletService {
       description: `1 ${category} credit used`,
     });
 
-    // Low credits alert
-    const threshold = (wallet as any)[`low${cap(category)}Threshold`] as number;
-    const alertSentKey = `low${cap(category)}AlertSent`;
-    if (creditsAfter <= threshold && !(wallet as any)[alertSentKey]) {
-      (wallet as any)[alertSentKey] = true;
-      await wallet.save();
-      this.logger.warn(`Low credits alert: org=${orgId} cat=${category} remaining=${creditsAfter}`);
-      // TODO: emit email/push notification
+    // Low credits alert — flip the flag atomically so only one send logs it.
+    const threshold = (wallet as any)[f.threshold] as number;
+    if (creditsAfter <= threshold && !(wallet as any)[f.alert]) {
+      const flipped = await this.walletModel.updateOne(
+        { organization, [f.alert]: { $ne: true } },
+        { $set: { [f.alert]: true } },
+      );
+      if (flipped.modifiedCount) {
+        this.logger.warn(`Low credits alert: org=${orgId} cat=${category} remaining=${creditsAfter}`);
+        // TODO: emit email/push notification
+      }
     }
 
     return tx;
@@ -359,9 +508,11 @@ export class WalletService {
     metaMessageId: string,
     failureReason: string,
   ): Promise<void> {
+    const organization = new Types.ObjectId(orgId);
+
     // Find original debit
     const original = await this.txModel.findOne({
-      organization: new Types.ObjectId(orgId),
+      organization,
       metaMessageId,
       type: TransactionType.DEBIT,
       reason: TransactionReason.MESSAGE_USE,
@@ -370,32 +521,30 @@ export class WalletService {
 
     // Already refunded?
     const exists = await this.txModel.findOne({
-      organization: new Types.ObjectId(orgId),
+      organization,
       metaMessageId,
       type: TransactionType.REFUND,
     });
     if (exists) return;
 
-    const wallet = await this.getOrCreate(orgId);
     const category = original.category;
-    const creditsBefore = wallet[category] as number;
-    const creditsAfter = creditsBefore + 1;
-
-    wallet[category] = creditsAfter;
-    (wallet as any)[`total${cap(category)}Used`] = Math.max(
-      0,
-      (wallet as any)[`total${cap(category)}Used`] - 1,
+    const f = fieldsFor(category);
+    const wallet = await this.walletModel.findOneAndUpdate(
+      { organization },
+      { $inc: { [f.balance]: 1, [f.used]: -1 } },
+      { new: true },
     );
-    await wallet.save();
+    if (!wallet) return;
+    const creditsAfter = wallet[category] as number;
 
     await this.txModel.create({
-      organization: new Types.ObjectId(orgId),
+      organization,
       wallet: wallet._id,
       type: TransactionType.REFUND,
       reason: TransactionReason.REFUND,
       category,
       credits: 1,
-      creditsBefore,
+      creditsBefore: creditsAfter - 1,
       creditsAfter,
       metaMessageId,
       description: `Refund: Meta failure — ${failureReason}`,
@@ -414,25 +563,24 @@ export class WalletService {
   ): Promise<void> {
     if (failedCount <= 0) return;
 
-    const wallet = await this.getOrCreate(orgId);
-    const creditsBefore = wallet[category] as number;
-    const creditsAfter = creditsBefore + failedCount;
-
-    wallet[category] = creditsAfter;
-    (wallet as any)[`total${cap(category)}Used`] = Math.max(
-      0,
-      (wallet as any)[`total${cap(category)}Used`] - failedCount,
-    );
-    await wallet.save();
+    const organization = new Types.ObjectId(orgId);
+    const f = fieldsFor(category);
+    await this.getOrCreate(orgId);
+    const wallet = (await this.walletModel.findOneAndUpdate(
+      { organization },
+      { $inc: { [f.balance]: failedCount, [f.used]: -failedCount } },
+      { new: true },
+    ))!;
+    const creditsAfter = wallet[category] as number;
 
     await this.txModel.create({
-      organization: new Types.ObjectId(orgId),
+      organization,
       wallet: wallet._id,
       type: TransactionType.REFUND,
       reason: TransactionReason.REFUND,
       category,
       credits: failedCount,
-      creditsBefore,
+      creditsBefore: creditsAfter - failedCount,
       creditsAfter,
       campaign: new Types.ObjectId(campaignId),
       description: `Campaign "${campaignName}" — ${failedCount} failed message${failedCount > 1 ? 's' : ''} refunded`,
@@ -448,9 +596,12 @@ export class WalletService {
     orgId: string,
     dto: UpdateWalletSettingsDto,
   ): Promise<WalletDocument> {
-    const wallet = await this.getOrCreate(orgId);
-    Object.assign(wallet, dto);
-    return wallet.save();
+    await this.getOrCreate(orgId);
+    return (await this.walletModel.findOneAndUpdate(
+      { organization: new Types.ObjectId(orgId) },
+      { $set: dto },
+      { new: true },
+    ))!;
   }
 
   // ── Transaction history ────────────────────────────────────────────
@@ -464,12 +615,18 @@ export class WalletService {
       if (query.to) filter.createdAt.$lte = new Date(query.to);
     }
 
-    const page = Number(query.page) || 1;
-    const limit = Number(query.limit) || 50;
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.min(200, Math.max(1, Number(query.limit) || 50));
     const skip = (page - 1) * limit;
 
     const [data, total] = await Promise.all([
-      this.txModel.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).exec(),
+      this.txModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate('counterparty', 'name slug')
+        .exec(),
       this.txModel.countDocuments(filter),
     ]);
 
@@ -537,7 +694,7 @@ export class WalletService {
   async getAllWallets() {
     return this.walletModel
       .find({})
-      .populate('organization', 'name slug status')
+      .populate('organization', 'name slug status isReseller reseller')
       .sort({ transactional: 1 })
       .exec();
   }
@@ -555,8 +712,27 @@ export class WalletService {
   }
 }
 
-// helper
+// ── helpers ───────────────────────────────────────────────────────────
 function cap(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+/** Wallet field names for one category, e.g. transactional → totalTransactionalAdded. */
+function fieldsFor(category: WalletCategory) {
+  const c = cap(category);
+  return {
+    balance: category as string,
+    added: `total${c}Added`,
+    used: `total${c}Used`,
+    threshold: `low${c}Threshold`,
+    alert: `low${c}AlertSent`,
+  };
+}
+
+function balancesOf(w: WalletDocument): CreditBalances {
+  return {
+    transactional: w.transactional,
+    promotional: w.promotional,
+    authentication: w.authentication,
+  };
+}

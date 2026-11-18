@@ -97,10 +97,14 @@ export class WalletTxQueryDto {
   @IsString() @IsOptional()
   to?: string;
 
+  // Validators are what keep these: the global ValidationPipe (whitelist) strips undecorated
+  // properties, which silently pinned every page to 1.
   @ApiPropertyOptional({ default: 1 })
+  @IsInt() @Min(1) @IsOptional()
   page?: number;
 
   @ApiPropertyOptional({ default: 50 })
+  @IsInt() @Min(1) @Max(200) @IsOptional()
   limit?: number;
 }
 

@@ -32,6 +32,11 @@ import { PricingModule } from './modules/pricing/pricing.module';
 import { ConversationsModule } from './modules/conversations/conversations.module';
 import { AiAgentsModule } from './modules/ai-agents/ai-agents.module';
 
+// Reseller + SaaS
+import { ResellerModule } from './modules/reseller/reseller.module';
+import { PlansModule } from './modules/plans/plans.module';
+import { BillingModule } from './modules/billing/billing.module';
+
 @Module({
   imports: [
     // Core config
@@ -97,6 +102,11 @@ import { AiAgentsModule } from './modules/ai-agents/ai-agents.module';
 
     // AI
     AiAgentsModule,
+
+    // Reseller + SaaS
+    ResellerModule,
+    PlansModule,
+    BillingModule,
   ],
 })
 export class AppModule {}
