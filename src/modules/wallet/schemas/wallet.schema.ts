@@ -34,6 +34,12 @@ export class Wallet {
 
   // Block sending when credits exhausted
   @Prop({ default: true }) blockOnEmpty: boolean;
+
+  // Last partner top-up references applied to this wallet. The balance increment and the
+  // reference are written in one atomic update, so a retried top-up can never credit twice.
+  // Hidden: only partnerTopup() reads it, and no save() elsewhere ever touches it.
+  @Prop({ type: [String], select: false, default: undefined })
+  topupRefs?: string[];
 }
 
 export const WalletSchema = SchemaFactory.createForClass(Wallet);
@@ -62,6 +68,7 @@ export enum TransactionReason {
   ADJUSTMENT    = 'adjustment',    // correction
   BONUS         = 'bonus',         // free credits
   EXPIRY        = 'expiry',        // credits expired (future)
+  PURCHASE      = 'purchase',      // bought online through a partner (e.g. Swaad Boss)
 }
 
 @Schema({ timestamps: true })
@@ -100,9 +107,17 @@ export class WalletTransaction {
   @Prop({ trim: true }) metaMessageId?: string;
   @Prop({ trim: true }) description?: string;
   @Prop({ trim: true }) performedBy?: string; // admin userId for topups
+
+  // Partner's idempotency key for a top-up (e.g. its order number). Unique per organization.
+  @Prop({ trim: true }) reference?: string;
 }
 
 export const WalletTransactionSchema = SchemaFactory.createForClass(WalletTransaction);
 WalletTransactionSchema.index({ organization: 1, createdAt: -1 });
 WalletTransactionSchema.index({ organization: 1, category: 1 });
 WalletTransactionSchema.index({ metaMessageId: 1 });
+// Only partner top-ups carry a reference, so every existing row is outside this index.
+WalletTransactionSchema.index(
+  { organization: 1, reference: 1 },
+  { unique: true, partialFilterExpression: { reference: { $type: 'string' } } },
+);

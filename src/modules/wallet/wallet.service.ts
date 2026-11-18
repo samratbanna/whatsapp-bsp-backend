@@ -11,7 +11,7 @@ import {
 } from './schemas/wallet.schema';
 import {
   AddCreditsDto, BulkAddCreditsDto,
-  DeductCreditsDto,
+  DeductCreditsDto, PartnerTopupDto,
   UpdateWalletSettingsDto, WalletTxQueryDto,
 } from './dto/wallet.dto';
 
@@ -219,6 +219,78 @@ export class WalletService {
       }, adminId);
     }
     return this.getOrCreate(orgId);
+  }
+
+  // ── Partner top-up (server-to-server, idempotent) ──────────────────
+  // A partner (Swaad Boss) sells credit packs to its customers and loads them here once the
+  // customer has paid. The partner retries until it hears back, so the same `reference` may
+  // arrive many times, concurrently, or after a timeout that actually succeeded — it must
+  // credit exactly once. The balance increment and the reference are one atomic update on the
+  // wallet document, so that holds without a Mongo transaction.
+  async partnerTopup(
+    orgId: string,
+    dto: PartnerTopupDto,
+  ): Promise<{
+    duplicate: boolean;
+    transaction: WalletTransactionDocument | null;
+    credits: Awaited<ReturnType<WalletService['getCredits']>>;
+  }> {
+    const organization = new Types.ObjectId(orgId);
+    const { category, credits, reference } = dto;
+
+    // Permanent record first: a reference that is already in the ledger is done.
+    const existing = await this.txModel.findOne({ organization, reference });
+    if (existing) {
+      return { duplicate: true, transaction: existing, credits: await this.getCredits(orgId) };
+    }
+
+    await this.getOrCreate(orgId);
+    const updated = await this.walletModel.findOneAndUpdate(
+      { organization, topupRefs: { $ne: reference } },
+      {
+        $inc: { [category]: credits, [`total${cap(category)}Added`]: credits },
+        $set: { [`low${cap(category)}AlertSent`]: false },
+        // Bounded: the ledger row above is the long-term record; this only has to cover the
+        // gap between the increment and that row being written.
+        $push: { topupRefs: { $each: [reference], $slice: -200 } },
+      },
+      { new: true },
+    );
+
+    if (!updated) {
+      // Another request with this reference won the update.
+      const tx = await this.txModel.findOne({ organization, reference });
+      return { duplicate: true, transaction: tx, credits: await this.getCredits(orgId) };
+    }
+
+    const creditsAfter = updated[category] as number;
+    let transaction: WalletTransactionDocument | null = null;
+    try {
+      transaction = await this.txModel.create({
+        organization,
+        wallet: updated._id,
+        type: TransactionType.CREDIT,
+        reason: TransactionReason.PURCHASE,
+        category,
+        credits,
+        creditsBefore: creditsAfter - credits,
+        creditsAfter,
+        reference,
+        description: dto.description || `${credits} ${category} credits purchased`,
+        performedBy: 'partner',
+      });
+    } catch (e: any) {
+      // The credits are in. A missing ledger row is a reporting gap, not a reason to fail the
+      // call — failing would make the partner retry, and the retry is (correctly) a no-op.
+      this.logger.error(
+        `Partner top-up ${reference}: credits added but ledger row not written: ${e?.message}`,
+      );
+    }
+
+    this.logger.log(
+      `Partner top-up: org=${orgId} cat=${category} +${credits} → ${creditsAfter} ref=${reference}`,
+    );
+    return { duplicate: false, transaction, credits: await this.getCredits(orgId) };
   }
 
   // ── KEY: Deduct 1 credit on message send ──────────────────────────

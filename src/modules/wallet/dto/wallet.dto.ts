@@ -1,6 +1,6 @@
 import {
   IsNumber, IsString, IsOptional,
-  IsEnum, Min, IsBoolean, IsInt,
+  IsEnum, Min, Max, IsBoolean, IsInt, Matches, MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { WalletCategory, TransactionReason } from '../schemas/wallet.schema';
@@ -104,3 +104,30 @@ export class WalletTxQueryDto {
   limit?: number;
 }
 
+
+// Partner server (e.g. Swaad Boss) loads credits its customer bought online.
+export class PartnerTopupDto {
+  @ApiProperty({ enum: WalletCategory, example: 'transactional' })
+  @IsEnum(WalletCategory)
+  category: WalletCategory;
+
+  @ApiProperty({ example: 1000, description: 'Number of message credits to add' })
+  @IsInt()
+  @Min(1)
+  @Max(10000000)
+  credits: number;
+
+  @ApiProperty({
+    example: 'WA0MHZ3K1A9F3C2B7E:0',
+    description: 'Idempotency key — the same reference is only ever credited once per organization',
+  })
+  @IsString()
+  @Matches(/^[A-Za-z0-9:_-]{1,100}$/, { message: 'reference must be 1-100 letters, digits, ":", "_" or "-"' })
+  reference: string;
+
+  @ApiPropertyOptional({ example: 'Swaad Boss order WA0MHZ3K1A9F3C2B7E — 1000 utility messages' })
+  @IsString()
+  @IsOptional()
+  @MaxLength(300)
+  description?: string;
+}

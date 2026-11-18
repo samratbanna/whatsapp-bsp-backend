@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { PublicApiLog, PublicApiLogSchema } from './schemas/public-api-log.schema';
 import { PublicApiController } from './public-api.controller';
+import { PartnerWalletController } from './partner-wallet.controller';
+import { PartnerSecretGuard } from './guards/partner-secret.guard';
 import { RequestLoggerInterceptor } from './interceptors/request-logger.interceptor';
 import { ApiKeysModule } from '../api-keys/api-keys.module';
 import { MessagesModule } from '../messages/messages.module';
@@ -22,7 +24,7 @@ import { WalletModule } from '../wallet/wallet.module';
     // balance without holding admin JWT credentials.
     WalletModule,
   ],
-  controllers: [PublicApiController],
-  providers: [RequestLoggerInterceptor],
+  controllers: [PublicApiController, PartnerWalletController],
+  providers: [RequestLoggerInterceptor, PartnerSecretGuard],
 })
 export class PublicApiModule {}
