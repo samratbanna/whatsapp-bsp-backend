@@ -1,7 +1,12 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { AppConfig, AppConfigDocument } from './schemas/app-config.schema';
+import {
+  AppConfig,
+  AppConfigDocument,
+  DEFAULT_APP_NAME,
+  LEGACY_APP_NAME,
+} from './schemas/app-config.schema';
 
 @Injectable()
 export class AppConfigService implements OnModuleInit {
@@ -16,6 +21,12 @@ export class AppConfigService implements OnModuleInit {
     if (!existing) {
       await this.configModel.create({ key: 'global' });
       console.log('✅ App config initialized');
+    } else if (existing.appName === LEGACY_APP_NAME) {
+      // Only the old default is replaced; a name the admin chose is left alone.
+      await this.configModel.updateOne(
+        { key: 'global', appName: LEGACY_APP_NAME },
+        { $set: { appName: DEFAULT_APP_NAME } },
+      );
     }
   }
 

@@ -3,13 +3,17 @@ import { Document } from 'mongoose';
 
 export type AppConfigDocument = AppConfig & Document;
 
+export const DEFAULT_APP_NAME = 'MsgConnect Pro';
+/** The name before the rebrand; a stored config still carrying it is moved to the new one. */
+export const LEGACY_APP_NAME = 'WhatsApp BSP';
+
 @Schema({ timestamps: true })
 export class AppConfig {
   @Prop({ required: true, unique: true, default: 'global' })
   key: string; // always 'global' — singleton pattern
 
   // Branding
-  @Prop({ default: 'WhatsApp BSP' })
+  @Prop({ default: DEFAULT_APP_NAME })
   appName: string;
 
   @Prop()

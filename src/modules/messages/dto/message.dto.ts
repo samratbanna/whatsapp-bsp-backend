@@ -11,7 +11,7 @@ export class SendTextDto {
   @IsString()
   to: string;
 
-  @ApiProperty({ example: 'Hello from BSP!' })
+  @ApiProperty({ example: 'Hello from MsgConnect Pro!' })
   @IsString()
   text: string;
 

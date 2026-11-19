@@ -42,8 +42,10 @@ async function bootstrap() {
   // Swagger — dev only
   if (config.get('NODE_ENV') !== 'production') {
     const swaggerConfig = new DocumentBuilder()
-      .setTitle('WhatsApp BSP API')
-      .setDescription('WhatsApp Business Solution Provider — Admin API')
+      .setTitle('MsgConnect Pro API')
+      .setDescription(
+        'MsgConnect Pro — WhatsApp Business messaging platform API',
+      )
       .setVersion('1.0')
       .addBearerAuth()
       .addTag('Auth')
